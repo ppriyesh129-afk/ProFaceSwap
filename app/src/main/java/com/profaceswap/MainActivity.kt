@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
@@ -11,6 +12,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        private const val TAG = "ProFaceSwapStartup"
+    }
 
     private lateinit var targetImage: ImageView
     private lateinit var statusText: TextView
@@ -54,122 +59,256 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
+    override fun onCreate(
+        savedInstanceState: Bundle?
+    ) {
+
         super.onCreate(savedInstanceState)
 
-        setContentView(R.layout.activity_main)
+        try {
 
-        targetImage =
-            findViewById(R.id.targetImage)
-
-        statusText =
-            findViewById(R.id.statusText)
-
-        faceSwapEngine =
-            FaceSwapEngine(this)
-
-        statusText.text =
-            if (faceSwapEngine.loadModels()) {
-                "AI models loaded"
-            } else {
-                "Failed to load AI models"
-            }
-
-        val selectTargetButton =
-            findViewById<Button>(
-                R.id.selectTargetButton
+            Log.d(
+                TAG,
+                "START: MainActivity.onCreate"
             )
 
-        val selectSourceButton =
-            findViewById<Button>(
-                R.id.selectSourceButton
+            setContentView(
+                R.layout.activity_main
             )
 
-        val swapButton =
-            findViewById<Button>(
-                R.id.swapButton
+            Log.d(
+                TAG,
+                "OK: layout loaded"
             )
 
-        selectTargetButton.setOnClickListener {
-            targetPicker.launch("image/*")
-        }
+            targetImage =
+                findViewById(
+                    R.id.targetImage
+                )
 
-        selectSourceButton.setOnClickListener {
-            sourcePicker.launch("image/*")
-        }
+            statusText =
+                findViewById(
+                    R.id.statusText
+                )
 
-        swapButton.setOnClickListener {
-
-            val target = targetBitmap
-            val source = sourceBitmap
-
-            if (target == null) {
-                statusText.text =
-                    "Please select a target image"
-                return@setOnClickListener
-            }
-
-            if (source == null) {
-                statusText.text =
-                    "Please select a source face"
-                return@setOnClickListener
-            }
+            Log.d(
+                TAG,
+                "OK: views loaded"
+            )
 
             statusText.text =
-                "Detecting target face..."
+                "Starting AI..."
 
+            /*
+             * IMPORTANT:
+             * Do not load the 1.58 GB BlendSwap
+             * model during app startup.
+             *
+             * We are testing whether the large
+             * model initialization is causing the
+             * immediate startup crash.
+             */
             Thread {
 
                 try {
 
-                    val result =
-                        faceSwapEngine.processSwap(
-                            target,
-                            source
+                    Log.d(
+                        TAG,
+                        "START: FaceSwapEngine"
+                    )
+
+                    val engine =
+                        FaceSwapEngine(
+                            this@MainActivity
                         )
 
+                    Log.d(
+                        TAG,
+                        "OK: FaceSwapEngine created"
+                    )
+
+                    val loaded =
+                        engine.loadModels()
+
+                    Log.d(
+                        TAG,
+                        "loadModels result = $loaded"
+                    )
+
                     runOnUiThread {
 
-                        targetImage.setImageBitmap(result)
+                        faceSwapEngine =
+                            engine
 
                         statusText.text =
-                            "478-point face analysis complete"
+                            if (loaded) {
+                                "AI models loaded"
+                            } else {
+                                "AI model loading failed"
+                            }
                     }
 
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
 
-                    e.printStackTrace()
+                    Log.e(
+                        TAG,
+                        "STARTUP AI ERROR",
+                        e
+                    )
 
                     runOnUiThread {
+
                         statusText.text =
-                            "Processing error: ${e.message}"
+                            "AI startup error: ${e.javaClass.simpleName}"
                     }
                 }
 
             }.start()
+
+            val selectTargetButton =
+                findViewById<Button>(
+                    R.id.selectTargetButton
+                )
+
+            val selectSourceButton =
+                findViewById<Button>(
+                    R.id.selectSourceButton
+                )
+
+            val swapButton =
+                findViewById<Button>(
+                    R.id.swapButton
+                )
+
+            selectTargetButton.setOnClickListener {
+
+                targetPicker.launch(
+                    "image/*"
+                )
+            }
+
+            selectSourceButton.setOnClickListener {
+
+                sourcePicker.launch(
+                    "image/*"
+                )
+            }
+
+            swapButton.setOnClickListener {
+
+                if (!::faceSwapEngine.isInitialized) {
+
+                    statusText.text =
+                        "AI models are still loading"
+
+                    return@setOnClickListener
+                }
+
+                val target =
+                    targetBitmap
+
+                val source =
+                    sourceBitmap
+
+                if (target == null) {
+
+                    statusText.text =
+                        "Please select a target image"
+
+                    return@setOnClickListener
+                }
+
+                if (source == null) {
+
+                    statusText.text =
+                        "Please select a source face"
+
+                    return@setOnClickListener
+                }
+
+                statusText.text =
+                    "Detecting target face..."
+
+                Thread {
+
+                    try {
+
+                        val result =
+                            faceSwapEngine.processSwap(
+                                target,
+                                source
+                            )
+
+                        runOnUiThread {
+
+                            targetImage.setImageBitmap(
+                                result
+                            )
+
+                            statusText.text =
+                                "478-point face analysis complete"
+                        }
+
+                    } catch (e: Throwable) {
+
+                        Log.e(
+                            TAG,
+                            "SWAP ERROR",
+                            e
+                        )
+
+                        runOnUiThread {
+
+                            statusText.text =
+                                "Processing error: ${e.javaClass.simpleName}"
+                        }
+                    }
+
+                }.start()
+            }
+
+        } catch (e: Throwable) {
+
+            Log.e(
+                TAG,
+                "MAIN ACTIVITY STARTUP ERROR",
+                e
+            )
         }
     }
 
-    private fun loadBitmap(uri: Uri): Bitmap? {
+    private fun loadBitmap(
+        uri: Uri
+    ): Bitmap? {
 
         return try {
 
             contentResolver
                 .openInputStream(uri)
                 ?.use { input ->
-                    BitmapFactory.decodeStream(input)
+
+                    BitmapFactory.decodeStream(
+                        input
+                    )
                 }
 
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
 
-            e.printStackTrace()
+            Log.e(
+                TAG,
+                "IMAGE LOAD ERROR",
+                e
+            )
+
             null
         }
     }
 
     override fun onDestroy() {
 
-        faceSwapEngine.close()
+        if (::faceSwapEngine.isInitialized) {
+            faceSwapEngine.close()
+        }
 
         targetBitmap?.recycle()
         sourceBitmap?.recycle()
