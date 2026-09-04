@@ -1,54 +1,272 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp">
+    android:fillViewport="true"
+    android:background="#0B0B10">
 
-    <TextView
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="ProFaceSwap"
-        android:textSize="28sp"
-        android:textStyle="bold"
-        android:gravity="center"
-        android:padding="12dp" />
+        android:orientation="vertical"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:paddingTop="22dp"
+        android:paddingBottom="24dp">
 
-    <ImageView
-        android:id="@+id/targetImage"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="8dp"
-        android:background="#DDDDDD"
-        android:contentDescription="Target image"
-        android:scaleType="fitCenter" />
+        <!-- HEADER -->
 
-    <Button
-        android:id="@+id/selectTargetButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Select Target Image" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="PROFACELAB"
+            android:textColor="#FFFFFF"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.08"
+            android:gravity="center" />
 
-    <Button
-        android:id="@+id/selectSourceButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Select Source Face" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="AI FACE SWAP"
+            android:textColor="#A78BFA"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.18"
+            android:gravity="center"
+            android:layout_marginTop="4dp" />
 
-    <Button
-        android:id="@+id/swapButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="SWAP FACES" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Create realistic face swaps directly on your phone"
+            android:textColor="#8E8E9A"
+            android:textSize="13sp"
+            android:gravity="center"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="18dp" />
 
-    <TextView
-        android:id="@+id/statusText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Ready"
-        android:gravity="center"
-        android:padding="8dp" />
+        <!-- PREVIEW CARD -->
 
-</LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:minHeight="320dp"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:padding="6dp"
+            android:background="#17171F">
+
+            <ImageView
+                android:id="@+id/targetImage"
+                android:layout_width="match_parent"
+                android:layout_height="320dp"
+                android:background="#111117"
+                android:contentDescription="Face swap preview"
+                android:scaleType="fitCenter" />
+
+        </LinearLayout>
+
+        <!-- PREVIEW LABEL -->
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="RESULT PREVIEW"
+            android:textColor="#777784"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.12"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="10dp" />
+
+        <!-- TARGET -->
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="14dp"
+            android:background="#17171F">
+
+            <TextView
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:text="1"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="#6D4AFF" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:paddingStart="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="TARGET PHOTO"
+                    android:textColor="#FFFFFF"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Choose the photo to edit"
+                    android:textColor="#858592"
+                    android:textSize="11sp"
+                    android:layout_marginTop="3dp" />
+
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/selectTargetButton"
+                android:layout_width="wrap_content"
+                android:layout_height="46dp"
+                android:text="CHOOSE"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#272631"
+                android:minWidth="0dp"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp" />
+
+        </LinearLayout>
+
+        <!-- SOURCE -->
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="14dp"
+            android:layout_marginTop="10dp"
+            android:background="#17171F">
+
+            <TextView
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:text="2"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:background="#A855F7" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:paddingStart="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SOURCE FACE"
+                    android:textColor="#FFFFFF"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Choose the face to use"
+                    android:textColor="#858592"
+                    android:textSize="11sp"
+                    android:layout_marginTop="3dp" />
+
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/selectSourceButton"
+                android:layout_width="wrap_content"
+                android:layout_height="46dp"
+                android:text="CHOOSE"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#272631"
+                android:minWidth="0dp"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp" />
+
+        </LinearLayout>
+
+        <!-- SWAP BUTTON -->
+
+        <Button
+            android:id="@+id/swapButton"
+            android:layout_width="match_parent"
+            android:layout_height="58dp"
+            android:text="✦  SWAP FACE"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.04"
+            android:backgroundTint="#7048FF"
+            android:layout_marginTop="16dp"
+            android:stateListAnimator="@null" />
+
+        <!-- DOWNLOAD / REFRESH -->
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="10dp">
+
+            <Button
+                android:id="@+id/downloadButton"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_weight="1"
+                android:text="↓  DOWNLOAD"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:backgroundTint="#22212B"
+                android:enabled="false"
+                android:layout_marginEnd="5dp" />
+
+            <Button
+                android:id="@+id/refreshButton"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_weight="1"
+                android:text="↻  NEW"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:backgroundTint="#22212B"
+                android:layout_marginStart="5dp" />
+
+        </LinearLayout>
+
+        <!-- STATUS -->
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="●  Ready"
+            android:textColor="#8E8E9A"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:paddingTop="14dp"
+            android:paddingBottom="4dp" />
+
+    </LinearLayout>
+
+</ScrollView>
