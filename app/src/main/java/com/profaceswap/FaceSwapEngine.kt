@@ -2069,6 +2069,21 @@ class FaceSwapEngine(
                 path,
                 paint
             )
+
+            val featherPaint =
+                Paint(
+                    Paint.ANTI_ALIAS_FLAG
+                )
+
+            featherPaint.color = Color.WHITE
+            featherPaint.style = Paint.Style.STROKE
+            featherPaint.strokeWidth = 18f
+            featherPaint.alpha = 180
+
+            canvas.drawPath(
+                path,
+                featherPaint
+            )
         }
 
         return mask
