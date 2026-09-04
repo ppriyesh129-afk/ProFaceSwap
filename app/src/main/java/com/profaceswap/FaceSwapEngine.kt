@@ -3,15 +3,13 @@ package com.profaceswap
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import ai.onnxruntime.TensorInfo
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
-import android.util.Log
 import java.nio.FloatBuffer
 import kotlin.math.max
 import kotlin.math.sqrt
@@ -36,36 +34,49 @@ class FaceSwapEngine(
     private var hyperSwapSession: OrtSession? = null
 
     fun loadModels(): Boolean {
+
         return try {
 
-            Log.d(TAG, "Loading BlazeFace")
+            android.util.Log.d(
+                TAG,
+                "Loading BlazeFace"
+            )
 
             detectorSession =
                 createSession(
                     "models/face_detection_short_range.onnx"
                 )
 
-            Log.d(TAG, "Loading 478-point landmarker")
+            android.util.Log.d(
+                TAG,
+                "Loading 478-point landmarker"
+            )
 
             landmarkerSession =
                 createSession(
                     "models/face_landmarker_Nx3x256x256.onnx"
                 )
 
-            Log.d(TAG, "Loading ArcFace")
+            android.util.Log.d(
+                TAG,
+                "Loading ArcFace"
+            )
 
             arcFaceSession =
                 createSession(
                     "models/arcface_w600k_r50.onnx"
                 )
 
-            Log.d(TAG, "Basic models loaded")
+            android.util.Log.d(
+                TAG,
+                "Basic models loaded"
+            )
 
             true
 
         } catch (e: Throwable) {
 
-            Log.e(
+            android.util.Log.e(
                 TAG,
                 "MODEL LOAD ERROR",
                 e
@@ -76,26 +87,33 @@ class FaceSwapEngine(
     }
 
     fun loadHyperSwap(): Boolean {
+
         return try {
 
             if (hyperSwapSession != null) {
                 return true
             }
 
-            Log.d(TAG, "Loading HyperSwap 1a")
+            android.util.Log.d(
+                TAG,
+                "Loading HyperSwap 1a 256"
+            )
 
             hyperSwapSession =
                 createSession(
                     "models/hyperswap_1a_256.onnx"
                 )
 
-            Log.d(TAG, "HyperSwap loaded")
+            android.util.Log.d(
+                TAG,
+                "HyperSwap loaded"
+            )
 
             true
 
         } catch (e: Throwable) {
 
-            Log.e(
+            android.util.Log.e(
                 TAG,
                 "HYPERSWAP LOAD ERROR",
                 e
@@ -129,6 +147,7 @@ class FaceSwapEngine(
                 )
 
         if (!loadHyperSwap()) {
+
             throw IllegalStateException(
                 "HyperSwap could not be loaded"
             )
@@ -140,36 +159,59 @@ class FaceSwapEngine(
                     "HyperSwap is not loaded"
                 )
 
-        Log.d(TAG, "Detecting faces")
+        android.util.Log.d(
+            TAG,
+            "Detecting source face"
+        )
 
         val faceDetector =
-            BlazeFaceDetector(detector)
+            BlazeFaceDetector(
+                detector
+            )
 
         val sourceFaces =
-            faceDetector.detect(source)
+            faceDetector.detect(
+                source
+            )
 
         if (sourceFaces.isEmpty()) {
+
             throw IllegalStateException(
                 "No face found in source image"
             )
         }
 
+        android.util.Log.d(
+            TAG,
+            "Detecting target face"
+        )
+
         val targetFaces =
-            faceDetector.detect(target)
+            faceDetector.detect(
+                target
+            )
 
         if (targetFaces.isEmpty()) {
+
             throw IllegalStateException(
                 "No face found in target image"
             )
         }
 
         val sourceFace =
-            largestFace(sourceFaces)
+            largestFace(
+                sourceFaces
+            )
 
         val targetFace =
-            largestFace(targetFaces)
+            largestFace(
+                targetFaces
+            )
 
-        Log.d(TAG, "Preparing source face")
+        android.util.Log.d(
+            TAG,
+            "Preparing source face"
+        )
 
         val sourceAligned =
             prepareFace(
@@ -178,7 +220,10 @@ class FaceSwapEngine(
                 landmarker
             )
 
-        Log.d(TAG, "Preparing target face")
+        android.util.Log.d(
+            TAG,
+            "Preparing target face"
+        )
 
         val targetAligned =
             prepareFace(
@@ -189,7 +234,10 @@ class FaceSwapEngine(
 
         try {
 
-            Log.d(TAG, "Creating ArcFace embedding")
+            android.util.Log.d(
+                TAG,
+                "Creating ArcFace embedding"
+            )
 
             val sourceEmbedding =
                 createArcFaceEmbedding(
@@ -197,7 +245,10 @@ class FaceSwapEngine(
                     arcFace
                 )
 
-            Log.d(TAG, "Running HyperSwap")
+            android.util.Log.d(
+                TAG,
+                "Running HyperSwap"
+            )
 
             val swap =
                 runHyperSwap(
@@ -206,7 +257,10 @@ class FaceSwapEngine(
                     hyperSwap
                 )
 
-            Log.d(TAG, "Pasting HyperSwap result")
+            android.util.Log.d(
+                TAG,
+                "Pasting HyperSwap result"
+            )
 
             return pasteBack(
                 original = target,
@@ -233,15 +287,21 @@ class FaceSwapEngine(
             )
 
         val width =
-            detection.right - detection.left
+            detection.right -
+                    detection.left
 
         val height =
-            detection.bottom - detection.top
+            detection.bottom -
+                    detection.top
 
         val faceSize =
-            max(width, height)
+            max(
+                width,
+                height
+            )
 
         if (faceSize <= 1f) {
+
             throw IllegalStateException(
                 "Invalid face size"
             )
@@ -251,24 +311,35 @@ class FaceSwapEngine(
             faceSize * 1.5f
 
         val centerX =
-            (detection.left + detection.right) * 0.5f
+            (
+                detection.left +
+                        detection.right
+                ) * 0.5f
 
         val centerY =
-            (detection.top + detection.bottom) * 0.5f
+            (
+                detection.top +
+                        detection.bottom
+                ) * 0.5f
 
         var roiLeft =
-            centerX - roiSize * 0.5f
+            centerX -
+                    roiSize * 0.5f
 
         var roiTop =
-            centerY - roiSize * 0.5f
+            centerY -
+                    roiSize * 0.5f
 
         var roiRight =
-            centerX + roiSize * 0.5f
+            centerX +
+                    roiSize * 0.5f
 
         var roiBottom =
-            centerY + roiSize * 0.5f
+            centerY +
+                    roiSize * 0.5f
 
         if (roiLeft < 0f) {
+
             val difference =
                 -roiLeft
 
@@ -277,6 +348,7 @@ class FaceSwapEngine(
         }
 
         if (roiTop < 0f) {
+
             val difference =
                 -roiTop
 
@@ -284,9 +356,14 @@ class FaceSwapEngine(
             roiBottom += difference
         }
 
-        if (roiRight > bitmap.width.toFloat()) {
+        if (
+            roiRight >
+            bitmap.width.toFloat()
+        ) {
+
             val difference =
-                roiRight - bitmap.width.toFloat()
+                roiRight -
+                        bitmap.width.toFloat()
 
             roiRight =
                 bitmap.width.toFloat()
@@ -294,9 +371,14 @@ class FaceSwapEngine(
             roiLeft -= difference
         }
 
-        if (roiBottom > bitmap.height.toFloat()) {
+        if (
+            roiBottom >
+            bitmap.height.toFloat()
+        ) {
+
             val difference =
-                roiBottom - bitmap.height.toFloat()
+                roiBottom -
+                        bitmap.height.toFloat()
 
             roiBottom =
                 bitmap.height.toFloat()
@@ -337,17 +419,25 @@ class FaceSwapEngine(
         val cropWidth =
             max(
                 1,
-                (roiRight - roiLeft).toInt()
+                (
+                    roiRight -
+                            roiLeft
+                    ).toInt()
             ).coerceAtMost(
-                bitmap.width - cropLeft
+                bitmap.width -
+                        cropLeft
             )
 
         val cropHeight =
             max(
                 1,
-                (roiBottom - roiTop).toInt()
+                (
+                    roiBottom -
+                            roiTop
+                    ).toInt()
             ).coerceAtMost(
-                bitmap.height - cropTop
+                bitmap.height -
+                        cropTop
             )
 
         val crop =
@@ -360,9 +450,14 @@ class FaceSwapEngine(
             )
 
         val rawLandmarks =
-            faceLandmarker.detect(crop)
+            faceLandmarker.detect(
+                crop
+            )
 
-        if (rawLandmarks.size < 292) {
+        if (
+            rawLandmarks.size <
+            292
+        ) {
 
             crop.recycle()
 
@@ -371,20 +466,13 @@ class FaceSwapEngine(
             )
         }
 
-        /*
-         * FaceLandmarker returns coordinates in its
-         * 256x256 input space.
-         *
-         * Convert them back into the actual crop
-         * coordinate system.
-         */
-
         val landmarks =
             Array(
                 rawLandmarks.size
             ) { index ->
 
                 floatArrayOf(
+
                     rawLandmarks[index][0] *
                             crop.width /
                             256f,
@@ -393,22 +481,27 @@ class FaceSwapEngine(
                             crop.height /
                             256f,
 
-                    if (rawLandmarks[index].size > 2) {
+                    if (
+                        rawLandmarks[index].size >
+                        2
+                    ) {
+
                         rawLandmarks[index][2]
+
                     } else {
+
                         0f
                     }
                 )
             }
 
-        /*
-         * Move the landmark coordinates from crop space
-         * into original-image space.
-         */
-
         for (point in landmarks) {
-            point[0] += cropLeft.toFloat()
-            point[1] += cropTop.toFloat()
+
+            point[0] +=
+                cropLeft.toFloat()
+
+            point[1] +=
+                cropTop.toFloat()
         }
 
         crop.recycle()
@@ -428,14 +521,6 @@ class FaceSwapEngine(
                 outputSize = HYPER_SIZE
             )
 
-        /*
-         * matrix maps original-image coordinates
-         * -> HyperSwap 256x256 coordinates.
-         *
-         * Its inverse maps HyperSwap coordinates
-         * -> original-image coordinates.
-         */
-
         val inverse =
             Matrix()
 
@@ -454,58 +539,34 @@ class FaceSwapEngine(
         )
     }
 
-    private fun hyperSwapTemplate(): Array<FloatArray> {
-
-        /*
-         * ArcFace-style 128 template scaled to 256.
-         */
+    private fun hyperSwapTemplate():
+        Array<FloatArray> {
 
         return arrayOf(
+
             floatArrayOf(
                 84.87f,
                 105.94f
             ),
+
             floatArrayOf(
                 171.13f,
                 105.94f
             ),
+
             floatArrayOf(
                 128.00f,
                 146.66f
             ),
+
             floatArrayOf(
                 96.95f,
                 188.64f
             ),
+
             floatArrayOf(
                 159.05f,
                 188.64f
-            )
-        )
-    }
-
-    private fun arcFaceTemplate(): Array<FloatArray> {
-
-        return arrayOf(
-            floatArrayOf(
-                0.34191607f * 112f,
-                0.46157411f * 112f
-            ),
-            floatArrayOf(
-                0.65653393f * 112f,
-                0.45983393f * 112f
-            ),
-            floatArrayOf(
-                0.50022500f * 112f,
-                0.64050536f * 112f
-            ),
-            floatArrayOf(
-                0.37097589f * 112f,
-                0.82469196f * 112f
-            ),
-            floatArrayOf(
-                0.63151696f * 112f,
-                0.82325089f * 112f
             )
         )
     }
@@ -524,7 +585,9 @@ class FaceSwapEngine(
             )
 
         val canvas =
-            Canvas(output)
+            Canvas(
+                output
+            )
 
         canvas.drawColor(
             Color.BLACK
@@ -550,7 +613,11 @@ class FaceSwapEngine(
         target: Array<FloatArray>
     ): Matrix {
 
-        if (source.size != 5 || target.size != 5) {
+        if (
+            source.size != 5 ||
+            target.size != 5
+        ) {
+
             throw IllegalStateException(
                 "Five landmarks are required"
             )
@@ -618,7 +685,10 @@ class FaceSwapEngine(
                         sy * sy
         }
 
-        if (denominator < 0.000001) {
+        if (
+            denominator <
+            0.000001
+        ) {
 
             throw IllegalStateException(
                 "Face alignment failed"
@@ -631,7 +701,10 @@ class FaceSwapEngine(
                         b * b
             )
 
-        if (magnitude < 0.000001) {
+        if (
+            magnitude <
+            0.000001
+        ) {
 
             throw IllegalStateException(
                 "Invalid alignment magnitude"
@@ -643,25 +716,31 @@ class FaceSwapEngine(
                     denominator
 
         val cos =
-            a / magnitude
+            a /
+                    magnitude
 
         val sin =
-            b / magnitude
+            b /
+                    magnitude
 
         val translateX =
             targetCx -
                     scale *
                     (
-                        cos * sourceCx -
-                                sin * sourceCy
+                        cos *
+                                sourceCx -
+                                sin *
+                                sourceCy
                         )
 
         val translateY =
             targetCy -
                     scale *
                     (
-                        sin * sourceCx +
-                                cos * sourceCy
+                        sin *
+                                sourceCx +
+                                cos *
+                                sourceCy
                         )
 
         val matrix =
@@ -669,13 +748,24 @@ class FaceSwapEngine(
 
         matrix.setValues(
             floatArrayOf(
-                (scale * cos).toFloat(),
-                (-scale * sin).toFloat(),
-                translateX.toFloat(),
 
-                (scale * sin).toFloat(),
-                (scale * cos).toFloat(),
-                translateY.toFloat(),
+                (scale * cos)
+                    .toFloat(),
+
+                (-scale * sin)
+                    .toFloat(),
+
+                translateX
+                    .toFloat(),
+
+                (scale * sin)
+                    .toFloat(),
+
+                (scale * cos)
+                    .toFloat(),
+
+                translateY
+                    .toFloat(),
 
                 0f,
                 0f,
@@ -691,26 +781,6 @@ class FaceSwapEngine(
         session: OrtSession
     ): FloatArray {
 
-        /*
-         * Re-align the HyperSwap 256 crop to ArcFace 112.
-         */
-
-        val pixels =
-            IntArray(
-                HYPER_SIZE *
-                        HYPER_SIZE
-            )
-
-        face.getPixels(
-            pixels,
-            0,
-            HYPER_SIZE,
-            0,
-            0,
-            HYPER_SIZE,
-            HYPER_SIZE
-        )
-
         val resized =
             Bitmap.createScaledBitmap(
                 face,
@@ -719,14 +789,14 @@ class FaceSwapEngine(
                 true
             )
 
-        val arcPixels =
+        val pixels =
             IntArray(
                 ARC_SIZE *
                         ARC_SIZE
             )
 
         resized.getPixels(
-            arcPixels,
+            pixels,
             0,
             ARC_SIZE,
             0,
@@ -742,16 +812,9 @@ class FaceSwapEngine(
                         ARC_SIZE
             )
 
-        /*
-         * ArcFace:
-         * RGB
-         * CHW
-         * [-1, 1]
-         */
-
         for (channel in 0..2) {
 
-            for (pixel in arcPixels) {
+            for (pixel in pixels) {
 
                 val value =
                     when (channel) {
@@ -767,7 +830,9 @@ class FaceSwapEngine(
                     }
 
                 buffer.put(
-                    value / 127.5f - 1f
+                    value /
+                            127.5f -
+                            1f
                 )
             }
         }
@@ -786,10 +851,14 @@ class FaceSwapEngine(
                 )
             )
 
+        val inputName =
+            session.inputNames.first()
+
         val result =
             session.run(
                 mapOf(
-                    "input" to tensor
+                    inputName to
+                            tensor
                 )
             )
 
@@ -802,10 +871,14 @@ class FaceSwapEngine(
         result.close()
         resized.recycle()
 
-        if (embedding.size != 512) {
+        if (
+            embedding.size !=
+            512
+        ) {
 
             throw IllegalStateException(
-                "ArcFace returned ${embedding.size} values"
+                "ArcFace returned " +
+                        "${embedding.size} values"
             )
         }
 
@@ -843,13 +916,6 @@ class FaceSwapEngine(
                         HYPER_SIZE
             )
 
-        /*
-         * HyperSwap target:
-         * RGB
-         * CHW
-         * normalized with mean/std 0.5
-         */
-
         for (channel in 0..2) {
 
             for (pixel in pixels) {
@@ -868,7 +934,9 @@ class FaceSwapEngine(
                     }
 
                 buffer.put(
-                    value / 127.5f - 1f
+                    value /
+                            127.5f -
+                            1f
                 )
             }
         }
@@ -899,32 +967,416 @@ class FaceSwapEngine(
                 )
             )
 
-        val result =
-            session.run(
-                mapOf(
-                    "source" to sourceTensor,
-                    "target" to targetTensor
-                )
-            )
+        val inputNames =
+            session.inputNames.toList()
 
-        val image =
-            extractFloatArray(
-                result[0].value
-            )
-
-        val mask =
-            extractFloatArray(
-                result[1].value
-            )
-
-        sourceTensor.close()
-        targetTensor.close()
-        result.close()
-
-        return HyperSwapResult(
-            bitmap = imageToBitmap(image),
-            mask = mask
+        android.util.Log.d(
+            TAG,
+            "HyperSwap inputs: $inputNames"
         )
+
+        val inputMap =
+            HashMap<String, OnnxTensor>()
+
+        if (
+            inputNames.contains(
+                "source"
+            )
+        ) {
+
+            inputMap["source"] =
+                sourceTensor
+
+        } else {
+
+            inputMap[
+                inputNames[0]
+            ] =
+                sourceTensor
+        }
+
+        if (
+            inputNames.contains(
+                "target"
+            )
+        ) {
+
+            inputMap["target"] =
+                targetTensor
+
+        } else {
+
+            if (inputNames.size < 2) {
+
+                sourceTensor.close()
+                targetTensor.close()
+
+                throw IllegalStateException(
+                    "HyperSwap expects fewer than " +
+                            "2 inputs: $inputNames"
+                )
+            }
+
+            inputMap[
+                inputNames[1]
+            ] =
+                targetTensor
+        }
+
+        val result =
+            try {
+
+                session.run(
+                    inputMap
+                )
+
+            } catch (e: Throwable) {
+
+                sourceTensor.close()
+                targetTensor.close()
+
+                throw IllegalStateException(
+                    "HyperSwap inference failed: " +
+                            "${e.message}",
+                    e
+                )
+            }
+
+        try {
+
+            val outputInfo =
+                session.outputInfo
+
+            val diagnostics =
+                StringBuilder()
+
+            diagnostics.append(
+                "HyperSwap output count: "
+            )
+
+            diagnostics.append(
+                result.size
+            )
+
+            diagnostics.append(
+                "\n\n"
+            )
+
+            diagnostics.append(
+                "MODEL OUTPUT INFO:\n"
+            )
+
+            for (
+                entry in outputInfo.entries
+            ) {
+
+                diagnostics.append(
+                    entry.key
+                )
+
+                diagnostics.append(
+                    " -> "
+                )
+
+                diagnostics.append(
+                    entry.value.info
+                )
+
+                diagnostics.append(
+                    "\n"
+                )
+            }
+
+            diagnostics.append(
+                "\nACTUAL OUTPUTS:\n"
+            )
+
+            for (
+                index in 0 until result.size
+            ) {
+
+                val value =
+                    result[index].value
+
+                diagnostics.append(
+                    "Output "
+                )
+
+                diagnostics.append(
+                    index
+                )
+
+                diagnostics.append(
+                    ": "
+                )
+
+                diagnostics.append(
+                    value?.javaClass?.name
+                        ?: "null"
+                )
+
+                diagnostics.append(
+                    "\n"
+                )
+
+                if (
+                    value is FloatArray
+                ) {
+
+                    diagnostics.append(
+                        "  FloatArray size="
+                    )
+
+                    diagnostics.append(
+                        value.size
+                    )
+
+                    diagnostics.append(
+                        "\n"
+                    )
+
+                } else if (
+                    value is DoubleArray
+                ) {
+
+                    diagnostics.append(
+                        "  DoubleArray size="
+                    )
+
+                    diagnostics.append(
+                        value.size
+                    )
+
+                    diagnostics.append(
+                        "\n"
+                    )
+
+                } else if (
+                    value is Array<*>
+                ) {
+
+                    diagnostics.append(
+                        "  Array size="
+                    )
+
+                    diagnostics.append(
+                        value.size
+                    )
+
+                    diagnostics.append(
+                        "\n"
+                    )
+
+                    val first =
+                        value.firstOrNull()
+
+                    if (
+                        first != null
+                    ) {
+
+                        diagnostics.append(
+                            "  First element type="
+                        )
+
+                        diagnostics.append(
+                            first.javaClass.name
+                        )
+
+                        diagnostics.append(
+                            "\n"
+                        )
+
+                        when (first) {
+
+                            is FloatArray -> {
+
+                                diagnostics.append(
+                                    "  First FloatArray size="
+                                )
+
+                                diagnostics.append(
+                                    first.size
+                                )
+
+                                diagnostics.append(
+                                    "\n"
+                                )
+                            }
+
+                            is DoubleArray -> {
+
+                                diagnostics.append(
+                                    "  First DoubleArray size="
+                                )
+
+                                diagnostics.append(
+                                    first.size
+                                )
+
+                                diagnostics.append(
+                                    "\n"
+                                )
+                            }
+
+                            is Array<*> -> {
+
+                                diagnostics.append(
+                                    "  First nested Array size="
+                                )
+
+                                diagnostics.append(
+                                    first.size
+                                )
+
+                                diagnostics.append(
+                                    "\n"
+                                )
+                            }
+                        }
+                    }
+                }
+
+                diagnostics.append(
+                    "\n"
+                )
+            }
+
+            android.util.Log.d(
+                TAG,
+                diagnostics.toString()
+            )
+
+            val imageRaw =
+                if (
+                    result.size >
+                    0
+                ) {
+
+                    result[0].value
+
+                } else {
+
+                    null
+                }
+
+            val maskRaw =
+                if (
+                    result.size >
+                    1
+                ) {
+
+                    result[1].value
+
+                } else {
+
+                    null
+                }
+
+            if (
+                imageRaw == null
+            ) {
+
+                throw IllegalStateException(
+                    diagnostics.toString()
+                )
+            }
+
+            val image =
+                try {
+
+                    extractFloatArray(
+                        imageRaw
+                    )
+
+                } catch (e: Throwable) {
+
+                    throw IllegalStateException(
+                        diagnostics.toString() +
+                                "\nIMAGE DECODE ERROR: " +
+                                "${e.message}",
+                        e
+                    )
+                }
+
+            val expectedImageSize =
+                3 *
+                        HYPER_SIZE *
+                        HYPER_SIZE
+
+            if (
+                image.size !=
+                expectedImageSize
+            ) {
+
+                throw IllegalStateException(
+                    diagnostics.toString() +
+                            "\nEXPECTED IMAGE VALUES: " +
+                            expectedImageSize +
+                            "\nACTUAL IMAGE VALUES: " +
+                            image.size
+                )
+            }
+
+            if (
+                maskRaw == null
+            ) {
+
+                throw IllegalStateException(
+                    diagnostics.toString() +
+                            "\nHyperSwap did not return " +
+                            "a second mask output."
+                )
+            }
+
+            val mask =
+                try {
+
+                    extractFloatArray(
+                        maskRaw
+                    )
+
+                } catch (e: Throwable) {
+
+                    throw IllegalStateException(
+                        diagnostics.toString() +
+                                "\nMASK DECODE ERROR: " +
+                                "${e.message}",
+                        e
+                    )
+                }
+
+            val expectedMaskSize =
+                HYPER_SIZE *
+                        HYPER_SIZE
+
+            if (
+                mask.size <
+                expectedMaskSize
+            ) {
+
+                throw IllegalStateException(
+                    diagnostics.toString() +
+                            "\nEXPECTED MASK VALUES: " +
+                            expectedMaskSize +
+                            "\nACTUAL MASK VALUES: " +
+                            mask.size
+                )
+            }
+
+            return HyperSwapResult(
+                bitmap =
+                    imageToBitmap(
+                        image
+                    ),
+                mask = mask
+            )
+
+        } finally {
+
+            sourceTensor.close()
+            targetTensor.close()
+            result.close()
+        }
     }
 
     private fun pasteBack(
@@ -942,7 +1394,11 @@ class FaceSwapEngine(
         val inverse =
             Matrix()
 
-        if (!transform.invert(inverse)) {
+        if (
+            !transform.invert(
+                inverse
+            )
+        ) {
 
             swap.bitmap.recycle()
 
@@ -958,7 +1414,9 @@ class FaceSwapEngine(
             )
 
         val canvas =
-            Canvas(output)
+            Canvas(
+                output
+            )
 
         val paint =
             Paint(
@@ -987,15 +1445,21 @@ class FaceSwapEngine(
             HYPER_SIZE *
                     HYPER_SIZE
 
-        if (mask.size < expected) {
+        if (
+            mask.size <
+            expected
+        ) {
 
             throw IllegalStateException(
-                "Invalid HyperSwap mask"
+                "Invalid HyperSwap mask: " +
+                        "${mask.size} values"
             )
         }
 
         val sourcePixels =
-            IntArray(expected)
+            IntArray(
+                expected
+            )
 
         bitmap.getPixels(
             sourcePixels,
@@ -1008,9 +1472,13 @@ class FaceSwapEngine(
         )
 
         val outputPixels =
-            IntArray(expected)
+            IntArray(
+                expected
+            )
 
-        for (i in 0 until expected) {
+        for (
+            i in 0 until expected
+        ) {
 
             val sourceColor =
                 sourcePixels[i]
@@ -1022,7 +1490,7 @@ class FaceSwapEngine(
                             0f,
                             1f
                         ) *
-                        255f
+                            255f
                     )
                     .toInt()
                     .coerceIn(
@@ -1033,9 +1501,15 @@ class FaceSwapEngine(
             outputPixels[i] =
                 Color.argb(
                     alpha,
-                    Color.red(sourceColor),
-                    Color.green(sourceColor),
-                    Color.blue(sourceColor)
+                    Color.red(
+                        sourceColor
+                    ),
+                    Color.green(
+                        sourceColor
+                    ),
+                    Color.blue(
+                        sourceColor
+                    )
                 )
         }
 
@@ -1070,17 +1544,26 @@ class FaceSwapEngine(
         val expected =
             plane * 3
 
-        if (values.size < expected) {
+        if (
+            values.size !=
+            expected
+        ) {
 
             throw IllegalStateException(
-                "Invalid HyperSwap image output"
+                "Invalid HyperSwap image output: " +
+                        "expected $expected values, " +
+                        "got ${values.size}"
             )
         }
 
         val pixels =
-            IntArray(plane)
+            IntArray(
+                plane
+            )
 
-        for (i in 0 until plane) {
+        for (
+            i in 0 until plane
+        ) {
 
             val r =
                 (
@@ -1159,7 +1642,8 @@ class FaceSwapEngine(
                 FloatArray(
                     raw.size
                 ) {
-                    raw[it].toFloat()
+                    raw[it]
+                        .toFloat()
                 }
 
             is Array<*> -> {
@@ -1176,7 +1660,8 @@ class FaceSwapEngine(
                         FloatArray(
                             first.size
                         ) {
-                            first[it].toFloat()
+                            first[it]
+                                .toFloat()
                         }
 
                     is Array<*> -> {
@@ -1202,14 +1687,16 @@ class FaceSwapEngine(
 
                     else ->
                         throw IllegalStateException(
-                            "Unexpected tensor output"
+                            "Unexpected tensor output type: " +
+                                    "${raw.javaClass.name}"
                         )
                 }
             }
 
             else ->
                 throw IllegalStateException(
-                    "Unexpected tensor output"
+                    "Unexpected tensor output type: " +
+                            "${raw.javaClass.name}"
                 )
         }
     }
@@ -1220,7 +1707,9 @@ class FaceSwapEngine(
 
         var sum = 0.0
 
-        for (value in values) {
+        for (
+            value in values
+        ) {
 
             sum +=
                 value.toDouble() *
@@ -1228,10 +1717,14 @@ class FaceSwapEngine(
         }
 
         val norm =
-            sqrt(sum)
-                .toFloat()
+            sqrt(
+                sum
+            ).toFloat()
 
-        if (norm < 0.000001f) {
+        if (
+            norm <
+            0.000001f
+        ) {
 
             throw IllegalStateException(
                 "Invalid ArcFace embedding"
@@ -1241,7 +1734,9 @@ class FaceSwapEngine(
         return FloatArray(
             values.size
         ) { index ->
-            values[index] / norm
+
+            values[index] /
+                    norm
         }
     }
 
@@ -1254,16 +1749,19 @@ class FaceSwapEngine(
             val width =
                 max(
                     0f,
-                    it.right - it.left
+                    it.right -
+                            it.left
                 )
 
             val height =
                 max(
                     0f,
-                    it.bottom - it.top
+                    it.bottom -
+                            it.top
                 )
 
-            width * height
+            width *
+                    height
 
         } ?: throw IllegalStateException(
             "No usable face found"
@@ -1274,27 +1772,37 @@ class FaceSwapEngine(
         assetPath: String
     ): OrtSession {
 
-        val file = java.io.File(
-            context.cacheDir,
-            assetPath.substringAfterLast("/")
-        )
+        val file =
+            java.io.File(
+                context.cacheDir,
+                assetPath.substringAfterLast(
+                    "/"
+                )
+            )
 
-        if (!file.exists()) {
-            context.assets.open(assetPath).use { input ->
-                file.outputStream().use { output ->
-                    input.copyTo(output)
+        if (
+            !file.exists()
+        ) {
+
+            context.assets
+                .open(
+                    assetPath
+                )
+                .use { input ->
+
+                    file.outputStream()
+                        .use { output ->
+
+                            input.copyTo(
+                                output
+                            )
+                        }
                 }
-            }
-        }
-
-        val options = OrtSession.SessionOptions().apply {
-            setMemoryPatternOptimization(false)
-            setCPUArenaAllocator(false)
         }
 
         return environment.createSession(
             file.absolutePath,
-            options
+            OrtSession.SessionOptions()
         )
     }
 
