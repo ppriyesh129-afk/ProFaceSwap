@@ -10,8 +10,7 @@ class FaceLandmarker(
     private val session: OrtSession
 ) {
 
-    private val environment =
-        OrtEnvironment.getEnvironment()
+    private val environment = OrtEnvironment.getEnvironment()
 
     companion object {
         private const val INPUT_SIZE = 256
@@ -27,13 +26,7 @@ class FaceLandmarker(
             true
         )
 
-        val buffer =
-            FloatBuffer.allocate(
-                3 * INPUT_SIZE * INPUT_SIZE
-            )
-
-        val pixels =
-            IntArray(INPUT_SIZE * INPUT_SIZE)
+        val pixels = IntArray(INPUT_SIZE * INPUT_SIZE)
 
         face.getPixels(
             pixels,
@@ -45,119 +38,98 @@ class FaceLandmarker(
             INPUT_SIZE
         )
 
-        // RGB, CHW, normalized to [-1, 1]
-        for (channel in 0..2) {
+        val buffer =
+            FloatBuffer.allocate(3 * INPUT_SIZE * INPUT_SIZE)
 
+        // RGB, CHW, normalized to [0, 1]
+        for (channel in 0..2) {
             for (pixel in pixels) {
 
-                val value =
-                    when (channel) {
-                        0 -> (pixel shr 16) and 0xFF
-                        1 -> (pixel shr 8) and 0xFF
-                        else -> pixel and 0xFF
-                    }
+                val value = when (channel) {
+                    0 -> (pixel shr 16) and 0xFF
+                    1 -> (pixel shr 8) and 0xFF
+                    else -> pixel and 0xFF
+                }
 
-                buffer.put(
-                    (value / 127.5f) - 1.0f
-                )
+                buffer.put(value / 255.0f)
             }
         }
 
         buffer.rewind()
 
-        val tensor =
-            OnnxTensor.createTensor(
-                environment,
-                buffer,
-                longArrayOf(
-                    1,
-                    3,
-                    INPUT_SIZE.toLong(),
-                    INPUT_SIZE.toLong()
-                )
+        val tensor = OnnxTensor.createTensor(
+            environment,
+            buffer,
+            longArrayOf(
+                1,
+                3,
+                INPUT_SIZE.toLong(),
+                INPUT_SIZE.toLong()
             )
+        )
 
-        val result =
-            session.run(
-                mapOf(
-                    session.inputNames.first() to tensor
-                )
+        val result = session.run(
+            mapOf(
+                session.inputNames.first() to tensor
             )
+        )
 
-        val output =
-            result[0].value
+        val rawLandmarks = result[0].value
 
-        val landmarks =
-            when (output) {
+        val landmarks = when (rawLandmarks) {
 
-                is Array<*> -> {
+            is Array<*> -> {
 
-                    val first =
-                        output[0]
+                val first = rawLandmarks[0]
 
-                    when (first) {
+                when (first) {
 
-                        is Array<*> -> {
+                    is FloatArray -> {
+                        Array(LANDMARK_COUNT) { index ->
+                            val offset = index * 3
 
-                            Array(LANDMARK_COUNT) { index ->
+                            floatArrayOf(
+                                first[offset],
+                                first[offset + 1],
+                                first[offset + 2]
+                            )
+                        }
+                    }
 
-                                val point =
-                                    first[index]
+                    is Array<*> -> {
+                        Array(LANDMARK_COUNT) { index ->
+                            val point = first[index]
 
-                                when (point) {
+                            when (point) {
+                                is FloatArray -> point
+                                is DoubleArray ->
+                                    FloatArray(point.size) {
+                                        point[it].toFloat()
+                                    }
 
-                                    is FloatArray ->
-                                        point
-
-                                    is DoubleArray ->
-                                        FloatArray(point.size) {
-                                            point[it].toFloat()
-                                        }
-
-                                    else ->
-                                        FloatArray(3)
-                                }
+                                else -> FloatArray(3)
                             }
                         }
-
-                        is FloatArray -> {
-
-                            Array(LANDMARK_COUNT) { index ->
-
-                                val offset =
-                                    index * 3
-
-                                floatArrayOf(
-                                    first[offset],
-                                    first[offset + 1],
-                                    first[offset + 2]
-                                )
-                            }
-                        }
-
-                        else ->
-                            emptyArray()
                     }
+
+                    else -> emptyArray()
                 }
-
-                is FloatArray -> {
-
-                    Array(LANDMARK_COUNT) { index ->
-
-                        val offset =
-                            index * 3
-
-                        floatArrayOf(
-                            output[offset],
-                            output[offset + 1],
-                            output[offset + 2]
-                        )
-                    }
-                }
-
-                else ->
-                    emptyArray()
             }
+
+            is FloatArray -> {
+                Array(LANDMARK_COUNT) { index ->
+                    val offset = index * 3
+
+                    floatArrayOf(
+                        rawLandmarks[offset],
+                        rawLandmarks[offset + 1],
+                        rawLandmarks[offset + 2]
+                    )
+                }
+            }
+
+            else -> emptyArray()
+        }
 
         tensor.close()
         result.close()
