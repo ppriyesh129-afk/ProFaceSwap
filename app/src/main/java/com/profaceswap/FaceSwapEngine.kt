@@ -3,7 +3,6 @@ package com.profaceswap
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
-import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -11,14 +10,17 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
-import android.graphics.RadialGradient
 import android.graphics.Shader
+import android.graphics.RadialGradient
 import java.nio.FloatBuffer
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
 
 class FaceSwapEngine(
-    private val context: Context
+    private val context: android.content.Context
 ) {
 
     private val environment =
@@ -95,16 +97,14 @@ class FaceSwapEngine(
     ): Bitmap {
 
         val targetLandmarks =
-            detectLandmarks(target)
-                ?: throw IllegalStateException(
-                    "No face found in target image"
-                )
+            detectLandmarks(
+                target
+            ) ?: return target
 
         val sourceLandmarks =
-            detectLandmarks(source)
-                ?: throw IllegalStateException(
-                    "No face found in source image"
-                )
+            detectLandmarks(
+                source
+            ) ?: return target
 
         val sourceAligned =
             FaceAlignment.align(
@@ -112,10 +112,7 @@ class FaceSwapEngine(
                 landmarks = sourceLandmarks,
                 outputSize = 112,
                 useArcFaceTemplate = true
-            )
-                ?: throw IllegalStateException(
-                    "Could not align source face"
-                )
+            ) ?: return target
 
         val targetAligned =
             FaceAlignment.align(
@@ -123,30 +120,35 @@ class FaceSwapEngine(
                 landmarks = targetLandmarks,
                 outputSize = 256,
                 useArcFaceTemplate = false
-            )
-                ?: throw IllegalStateException(
-                    "Could not align target face"
-                )
+            ) ?: run {
+                sourceAligned.bitmap.recycle()
+                return target
+            }
 
-        try {
+        val swappedFace =
+            try {
 
-            val swappedFace =
                 runBlendSwap(
                     sourceAligned.bitmap,
                     targetAligned.bitmap
                 )
 
-            return pasteBack(
-                target = target,
-                swapped = swappedFace,
-                targetLandmarks = targetLandmarks
-            )
+            } catch (e: Exception) {
 
-        } finally {
+                sourceAligned.bitmap.recycle()
+                targetAligned.bitmap.recycle()
 
-            sourceAligned.bitmap.recycle()
-            targetAligned.bitmap.recycle()
-        }
+                throw e
+            }
+
+        sourceAligned.bitmap.recycle()
+        targetAligned.bitmap.recycle()
+
+        return pasteBack(
+            target = target,
+            swapped = swappedFace,
+            targetLandmarks = targetLandmarks
+        )
     }
 
     private fun detectLandmarks(
@@ -198,107 +200,422 @@ class FaceSwapEngine(
                     bitmap.height
                 )
 
-        val width =
+        val boxWidth =
             right - left
 
-        val height =
+        val boxHeight =
             bottom - top
 
-        val size =
-            max(width, height)
+        val longSide =
+            max(
+                boxWidth,
+                boxHeight
+            )
 
-        val margin =
-            (size * 0.25f).toInt()
-
+        /*
+         * MediaPipe-style ROI:
+         *
+         * detector box expanded by 25% on
+         * every side = 1.5x total size.
+         */
         val cropSize =
-            size + margin * 2
+            (longSide * 1.5f)
+                .toInt()
+                .coerceAtLeast(2)
 
         val centerX =
-            (left + right) / 2
+            (left + right) / 2f
 
         val centerY =
-            (top + bottom) / 2
+            (top + bottom) / 2f
 
         val cropLeft =
-            (centerX - cropSize / 2)
-                .coerceIn(
-                    0,
-                    max(
-                        0,
-                        bitmap.width - cropSize
-                    )
-                )
+            (centerX - cropSize / 2f)
+                .toInt()
 
         val cropTop =
-            (centerY - cropSize / 2)
+            (centerY - cropSize / 2f)
+                .toInt()
+
+        val square =
+            createSquareCrop(
+                bitmap,
+                cropLeft,
+                cropTop,
+                cropSize
+            )
+
+        /*
+         * First landmark pass gives us the eye
+         * positions needed to estimate roll.
+         */
+        val firstLandmarks =
+            landmarker?.detect(square.bitmap)
+                ?: emptyArray()
+
+        if (firstLandmarks.size < 292) {
+            square.bitmap.recycle()
+            return null
+        }
+
+        val leftEye =
+            averageLandmarks(
+                firstLandmarks,
+                intArrayOf(
+                    33,
+                    133,
+                    160,
+                    159,
+                    158,
+                    157,
+                    173
+                )
+            )
+
+        val rightEye =
+            averageLandmarks(
+                firstLandmarks,
+                intArrayOf(
+                    263,
+                    362,
+                    387,
+                    386,
+                    385,
+                    384,
+                    398
+                )
+            )
+
+        /*
+         * Landmark coordinates are in the 256x256
+         * landmarker input coordinate system.
+         */
+        val dx =
+            rightEye[0] - leftEye[0]
+
+        val dy =
+            rightEye[1] - leftEye[1]
+
+        val angleDegrees =
+            Math.toDegrees(
+                atan2(
+                    dy.toDouble(),
+                    dx.toDouble()
+                )
+            ).toFloat()
+
+        /*
+         * Rotate only when meaningful roll exists.
+         */
+        if (kotlin.math.abs(angleDegrees) < 1.0f) {
+
+            square.bitmap.recycle()
+
+            return mapLandmarksToOriginal(
+                firstLandmarks,
+                cropLeft,
+                cropTop,
+                cropSize,
+                cropSize
+            )
+        }
+
+        val rotated =
+            rotateBitmap(
+                square.bitmap,
+                -angleDegrees
+            )
+
+        square.bitmap.recycle()
+
+        /*
+         * Second landmark pass on the corrected ROI.
+         */
+        val finalLandmarks =
+            landmarker?.detect(rotated.bitmap)
+                ?: emptyArray()
+
+        if (finalLandmarks.size < 292) {
+            rotated.bitmap.recycle()
+            return null
+        }
+
+        /*
+         * rotated.bitmap is still square and has the
+         * same dimensions as the original crop.
+         *
+         * Convert the landmark positions back through
+         * the inverse rotation, then into original image
+         * coordinates.
+         */
+        val mapped =
+            mapRotatedLandmarksToOriginal(
+                landmarks = finalLandmarks,
+                cropLeft = cropLeft,
+                cropTop = cropTop,
+                cropSize = cropSize,
+                angleDegrees = -angleDegrees
+            )
+
+        rotated.bitmap.recycle()
+
+        return mapped
+    }
+
+    private data class SquareCrop(
+        val bitmap: Bitmap,
+        val left: Int,
+        val top: Int
+    )
+
+    private fun createSquareCrop(
+        bitmap: Bitmap,
+        requestedLeft: Int,
+        requestedTop: Int,
+        requestedSize: Int
+    ): SquareCrop {
+
+        val size =
+            requestedSize
+                .coerceAtMost(
+                    max(
+                        bitmap.width,
+                        bitmap.height
+                    )
+                )
+
+        val left =
+            requestedLeft
                 .coerceIn(
                     0,
                     max(
                         0,
-                        bitmap.height - cropSize
+                        bitmap.width - size
                     )
                 )
 
-        val actualWidth =
+        val top =
+            requestedTop
+                .coerceIn(
+                    0,
+                    max(
+                        0,
+                        bitmap.height - size
+                    )
+                )
+
+        val width =
             min(
-                cropSize,
-                bitmap.width - cropLeft
+                size,
+                bitmap.width - left
             )
 
-        val actualHeight =
+        val height =
             min(
-                cropSize,
-                bitmap.height - cropTop
+                size,
+                bitmap.height - top
             )
 
-        if (
-            actualWidth <= 1 ||
-            actualHeight <= 1
-        ) {
-            return null
-        }
+        val actualSize =
+            min(
+                width,
+                height
+            )
 
         val crop =
             Bitmap.createBitmap(
                 bitmap,
-                cropLeft,
-                cropTop,
-                actualWidth,
-                actualHeight
+                left,
+                top,
+                actualSize,
+                actualSize
             )
 
-        val landmarks =
-            try {
-                landmarker?.detect(crop)
-                    ?: emptyArray()
-            } finally {
-                crop.recycle()
+        return SquareCrop(
+            bitmap = crop,
+            left = left,
+            top = top
+        )
+    }
+
+    private fun rotateBitmap(
+        bitmap: Bitmap,
+        degrees: Float
+    ): SquareCrop {
+
+        val matrix =
+            Matrix().apply {
+                postRotate(
+                    degrees,
+                    bitmap.width / 2f,
+                    bitmap.height / 2f
+                )
             }
 
-        if (landmarks.size < 478) {
-            return null
+        val rotated =
+            Bitmap.createBitmap(
+                bitmap,
+                0,
+                0,
+                bitmap.width,
+                bitmap.height,
+                matrix,
+                true
+            )
+
+        return SquareCrop(
+            bitmap = rotated,
+            left = 0,
+            top = 0
+        )
+    }
+
+    private fun averageLandmarks(
+        landmarks: Array<FloatArray>,
+        indices: IntArray
+    ): FloatArray {
+
+        var x = 0f
+        var y = 0f
+        var count = 0
+
+        for (index in indices) {
+
+            if (
+                index >= 0 &&
+                index < landmarks.size &&
+                landmarks[index].size >= 2
+            ) {
+
+                x += landmarks[index][0]
+                y += landmarks[index][1]
+
+                count++
+            }
         }
+
+        if (count == 0) {
+            return floatArrayOf(
+                128f,
+                128f
+            )
+        }
+
+        return floatArrayOf(
+            x / count,
+            y / count
+        )
+    }
+
+    private fun mapLandmarksToOriginal(
+        landmarks: Array<FloatArray>,
+        cropLeft: Int,
+        cropTop: Int,
+        cropWidth: Int,
+        cropHeight: Int
+    ): Array<FloatArray> {
 
         return Array(
             landmarks.size
         ) { index ->
 
+            val point =
+                landmarks[index]
+
             val x =
                 cropLeft +
-                        landmarks[index][0] *
-                        actualWidth /
+                        point[0] *
+                        cropWidth /
                         256f
 
             val y =
                 cropTop +
-                        landmarks[index][1] *
-                        actualHeight /
+                        point[1] *
+                        cropHeight /
                         256f
 
             floatArrayOf(
                 x,
                 y,
-                landmarks[index][2]
+                if (point.size >= 3) {
+                    point[2]
+                } else {
+                    0f
+                }
+            )
+        }
+    }
+
+    private fun mapRotatedLandmarksToOriginal(
+        landmarks: Array<FloatArray>,
+        cropLeft: Int,
+        cropTop: Int,
+        cropSize: Int,
+        angleDegrees: Float
+    ): Array<FloatArray> {
+
+        val center =
+            cropSize / 2f
+
+        val radians =
+            Math.toRadians(
+                angleDegrees.toDouble()
+            )
+
+        val cosValue =
+            cos(radians)
+
+        val sinValue =
+            sin(radians)
+
+        return Array(
+            landmarks.size
+        ) { index ->
+
+            val point =
+                landmarks[index]
+
+            val x =
+                point[0] *
+                        cropSize /
+                        256f
+
+            val y =
+                point[1] *
+                        cropSize /
+                        256f
+
+            val dx =
+                x - center
+
+            val dy =
+                y - center
+
+            /*
+             * Inverse rotation.
+             */
+            val originalX =
+                center +
+                        (
+                            dx * cosValue -
+                                    dy * sinValue
+                            ).toFloat()
+
+            val originalY =
+                center +
+                        (
+                            dx * sinValue +
+                                    dy * cosValue
+                            ).toFloat()
+
+            floatArrayOf(
+                cropLeft + originalX,
+                cropTop + originalY,
+                if (point.size >= 3) {
+                    point[2]
+                } else {
+                    0f
+                }
             )
         }
     }
@@ -314,87 +631,155 @@ class FaceSwapEngine(
                     "BlendSwap model is not loaded"
                 )
 
-        val sourceTensor =
-            createImageTensor(
+        val sourceBuffer =
+            bitmapToCHW(
                 source,
                 112
             )
 
-        val targetTensor =
-            createImageTensor(
+        val targetBuffer =
+            bitmapToCHW(
                 target,
                 256
             )
 
-        try {
-
-            val inputs =
-                HashMap<String, OnnxTensor>()
-
-            for (name in session.inputNames) {
-
-                when (name) {
-
-                    "source" ->
-                        inputs[name] =
-                            sourceTensor
-
-                    "target" ->
-                        inputs[name] =
-                            targetTensor
-                }
-            }
-
-            if (
-                !inputs.containsKey("source") ||
-                !inputs.containsKey("target")
-            ) {
-
-                throw IllegalStateException(
-                    "BlendSwap requires source and target inputs"
+        val sourceTensor =
+            OnnxTensor.createTensor(
+                environment,
+                sourceBuffer,
+                longArrayOf(
+                    1,
+                    3,
+                    112,
+                    112
                 )
+            )
+
+        val targetTensor =
+            OnnxTensor.createTensor(
+                environment,
+                targetBuffer,
+                longArrayOf(
+                    1,
+                    3,
+                    256,
+                    256
+                )
+            )
+
+        val inputs =
+            HashMap<String, OnnxTensor>()
+
+        for (input in session.inputInfo.keys) {
+
+            when (input) {
+
+                "source" ->
+                    inputs["source"] =
+                        sourceTensor
+
+                "target" ->
+                    inputs["target"] =
+                        targetTensor
             }
+        }
 
-            val result =
-                session.run(inputs)
+        if (
+            !inputs.containsKey("source") ||
+            !inputs.containsKey("target")
+        ) {
 
+            sourceTensor.close()
+            targetTensor.close()
+
+            throw IllegalStateException(
+                "BlendSwap inputs were not found"
+            )
+        }
+
+        val result =
             try {
 
-                val output =
-                    result[0].value
-
-                return decodeBlendSwapOutput(
-                    output
+                session.run(
+                    inputs
                 )
 
-            } finally {
+            } catch (e: Exception) {
 
-                result.close()
+                sourceTensor.close()
+                targetTensor.close()
+
+                throw e
             }
 
+        try {
+
+            val rawOutput =
+                result[0].value
+
+            return decodeBlendSwapOutput(
+                rawOutput
+            )
+
         } finally {
+
+            result.close()
 
             sourceTensor.close()
             targetTensor.close()
         }
     }
 
-    private fun createImageTensor(
+    private fun bitmapToCHW(
         bitmap: Bitmap,
         size: Int
-    ): OnnxTensor {
+    ): FloatBuffer {
+
+        val resized =
+            if (
+                bitmap.width != size ||
+                bitmap.height != size
+            ) {
+
+                Bitmap.createScaledBitmap(
+                    bitmap,
+                    size,
+                    size,
+                    true
+                )
+
+            } else {
+                bitmap
+            }
 
         val pixels =
-            getPixels(
-                bitmap,
-                size
+            IntArray(
+                size * size
             )
+
+        resized.getPixels(
+            pixels,
+            0,
+            size,
+            0,
+            0,
+            size,
+            size
+        )
 
         val buffer =
             FloatBuffer.allocate(
-                3 * size * size
+                3 *
+                        size *
+                        size
             )
 
+        /*
+         * BlendSwap:
+         * RGB
+         * CHW
+         * [0,1]
+         */
         for (channel in 0..2) {
 
             for (pixel in pixels) {
@@ -420,121 +805,71 @@ class FaceSwapEngine(
 
         buffer.rewind()
 
-        return OnnxTensor.createTensor(
-            environment,
-            buffer,
-            longArrayOf(
-                1,
-                3,
-                size.toLong(),
-                size.toLong()
-            )
-        )
-    }
-
-    private fun getPixels(
-        bitmap: Bitmap,
-        size: Int
-    ): IntArray {
-
-        val resized =
-            if (
-                bitmap.width != size ||
-                bitmap.height != size
-            ) {
-                Bitmap.createScaledBitmap(
-                    bitmap,
-                    size,
-                    size,
-                    true
-                )
-            } else {
-                bitmap
-            }
-
-        val pixels =
-            IntArray(
-                size * size
-            )
-
-        resized.getPixels(
-            pixels,
-            0,
-            size,
-            0,
-            0,
-            size,
-            size
-        )
-
         if (resized !== bitmap) {
             resized.recycle()
         }
 
-        return pixels
+        return buffer
     }
 
     private fun decodeBlendSwapOutput(
         raw: Any
     ): Bitmap {
 
-        val tensor =
+        /*
+         * Expected BlendSwap output:
+         *
+         * [1, 3, 256, 256]
+         *
+         * We accept the normal nested ONNX Java
+         * representation:
+         *
+         * Array -> Array -> Array -> FloatArray
+         */
+        val batch =
             raw as? Array<*>
                 ?: throw IllegalStateException(
                     "Unexpected BlendSwap output type: ${raw::class.java.name}"
                 )
 
-        if (tensor.isEmpty()) {
+        val channelsObject =
+            batch.firstOrNull()
+                as? Array<*>
+                ?: throw IllegalStateException(
+                    "Unexpected BlendSwap batch output"
+                )
+
+        if (channelsObject.size < 3) {
+
             throw IllegalStateException(
-                "BlendSwap returned empty output"
+                "BlendSwap output has fewer than 3 channels"
             )
         }
 
-        val batch =
-            tensor[0] as? Array<*>
-                ?: throw IllegalStateException(
-                    "Unexpected BlendSwap output shape"
-                )
+        val channels =
+            Array(
+                3
+            ) { channelIndex ->
 
-        if (batch.size != 3) {
-            throw IllegalStateException(
-                "BlendSwap output has ${batch.size} channels, expected 3"
-            )
-        }
-
-        val red =
-            batch[0] as? FloatArray
-                ?: throw IllegalStateException(
-                    "Invalid red channel"
+                flattenFloatArray(
+                    channelsObject[channelIndex]
                 )
-
-        val green =
-            batch[1] as? FloatArray
-                ?: throw IllegalStateException(
-                    "Invalid green channel"
-                )
-
-        val blue =
-            batch[2] as? FloatArray
-                ?: throw IllegalStateException(
-                    "Invalid blue channel"
-                )
+            }
 
         val expected =
             256 * 256
 
-        if (
-            red.size != expected ||
-            green.size != expected ||
-            blue.size != expected
-        ) {
-            throw IllegalStateException(
-                "Unexpected BlendSwap output size: " +
-                        "${red.size}, ${green.size}, ${blue.size}"
-            )
+        for (channel in channels) {
+
+            if (channel.size < expected) {
+
+                throw IllegalStateException(
+                    "BlendSwap output channel is too small: ${channel.size}"
+                )
+            }
         }
 
-        val output =
+        val bitmap =
             Bitmap.createBitmap(
                 256,
                 256,
@@ -542,21 +877,35 @@ class FaceSwapEngine(
             )
 
         val pixels =
-            IntArray(expected)
+            IntArray(
+                expected
+            )
 
         for (i in pixels.indices) {
 
             val r =
-                (red[i] * 255f)
-                    .roundToByte()
+                (channels[0][i] * 255f)
+                    .toInt()
+                    .coerceIn(
+                        0,
+                        255
+                    )
 
             val g =
-                (green[i] * 255f)
-                    .roundToByte()
+                (channels[1][i] * 255f)
+                    .toInt()
+                    .coerceIn(
+                        0,
+                        255
+                    )
 
             val b =
-                (blue[i] * 255f)
-                    .roundToByte()
+                (channels[2][i] * 255f)
+                    .toInt()
+                    .coerceIn(
+                        0,
+                        255
+                    )
 
             pixels[i] =
                 Color.rgb(
@@ -566,7 +915,7 @@ class FaceSwapEngine(
                 )
         }
 
-        output.setPixels(
+        bitmap.setPixels(
             pixels,
             0,
             256,
@@ -576,16 +925,75 @@ class FaceSwapEngine(
             256
         )
 
-        return output
+        return bitmap
     }
 
-    private fun Float.roundToByte(): Int {
+    private fun flattenFloatArray(
+        raw: Any?
+    ): FloatArray {
 
-        return this
-            .coerceIn(0f, 1f)
-            .times(255f)
-            .toInt()
-            .coerceIn(0, 255)
+        return when (raw) {
+
+            is FloatArray ->
+                raw
+
+            is DoubleArray ->
+                FloatArray(
+                    raw.size
+                ) {
+                    raw[it].toFloat()
+                }
+
+            is Array<*> -> {
+
+                val output =
+                    ArrayList<Float>()
+
+                fun collect(
+                    value: Any?
+                ) {
+
+                    when (value) {
+
+                        is FloatArray -> {
+
+                            for (v in value) {
+                                output.add(v)
+                            }
+                        }
+
+                        is DoubleArray -> {
+
+                            for (v in value) {
+                                output.add(
+                                    v.toFloat()
+                                )
+                            }
+                        }
+
+                        is Array<*> -> {
+
+                            for (item in value) {
+                                collect(item)
+                            }
+                        }
+                    }
+                }
+
+                collect(raw)
+
+                FloatArray(
+                    output.size
+                ) {
+                    output[it]
+                }
+            }
+
+            else ->
+                throw IllegalStateException(
+                    "Unexpected BlendSwap channel type"
+                )
+        }
     }
 
     private fun pasteBack(
@@ -600,13 +1008,19 @@ class FaceSwapEngine(
                 landmarks = targetLandmarks,
                 outputSize = 256,
                 useArcFaceTemplate = false
-            )
-                ?: return target
+            ) ?: run {
+                swapped.recycle()
+                return target
+            }
 
         val inverse =
             Matrix()
 
-        if (!aligned.matrix.invert(inverse)) {
+        if (
+            !aligned.matrix.invert(
+                inverse
+            )
+        ) {
 
             aligned.bitmap.recycle()
             swapped.recycle()
@@ -614,141 +1028,29 @@ class FaceSwapEngine(
             return target
         }
 
-        val result =
-            target.copy(
-                Bitmap.Config.ARGB_8888,
-                true
-            )
-
+        /*
+         * Create a soft face-shaped mask.
+         */
         val mask =
-            createFeatherMask()
-
-        val transformedFace =
             Bitmap.createBitmap(
-                target.width,
-                target.height,
+                256,
+                256,
                 Bitmap.Config.ARGB_8888
-            )
-
-        val faceCanvas =
-            Canvas(transformedFace)
-
-        val facePaint =
-            Paint(
-                Paint.ANTI_ALIAS_FLAG or
-                        Paint.FILTER_BITMAP_FLAG
-            )
-
-        faceCanvas.drawBitmap(
-            swapped,
-            inverse,
-            facePaint
-        )
-
-        val transformedMask =
-            Bitmap.createBitmap(
-                target.width,
-                target.height,
-                Bitmap.Config.ALPHA_8
             )
 
         val maskCanvas =
-            Canvas(transformedMask)
-
-        maskCanvas.drawBitmap(
-            mask,
-            inverse,
-            null
-        )
-
-        val resultCanvas =
-            Canvas(result)
-
-        val blendPaint =
-            Paint(
-                Paint.ANTI_ALIAS_FLAG
-            )
-
-        blendPaint.xfermode =
-            PorterDuffXfermode(
-                PorterDuff.Mode.DST_IN
-            )
-
-        /*
-         * Keep the transformed face only
-         * where the feathered mask exists.
-         */
-
-        val clippedFace =
-            Bitmap.createBitmap(
-                target.width,
-                target.height,
-                Bitmap.Config.ARGB_8888
-            )
-
-        val clippedCanvas =
-            Canvas(clippedFace)
-
-        clippedCanvas.drawBitmap(
-            transformedFace,
-            0f,
-            0f,
-            null
-        )
-
-        blendPaint.xfermode =
-            PorterDuffXfermode(
-                PorterDuff.Mode.DST_IN
-            )
-
-        clippedCanvas.drawBitmap(
-            transformedMask,
-            0f,
-            0f,
-            blendPaint
-        )
-
-        blendPaint.xfermode = null
-
-        resultCanvas.drawBitmap(
-            clippedFace,
-            0f,
-            0f,
-            null
-        )
-
-        aligned.bitmap.recycle()
-        swapped.recycle()
-        mask.recycle()
-        transformedFace.recycle()
-        transformedMask.recycle()
-        clippedFace.recycle()
-
-        return result
-    }
-
-    private fun createFeatherMask(): Bitmap {
-
-        val mask =
-            Bitmap.createBitmap(
-                256,
-                256,
-                Bitmap.Config.ALPHA_8
-            )
-
-        val canvas =
             Canvas(mask)
 
-        val paint =
+        val maskPaint =
             Paint(
                 Paint.ANTI_ALIAS_FLAG
             )
 
-        paint.shader =
+        maskPaint.shader =
             RadialGradient(
                 128f,
                 128f,
-                128f,
+                145f,
                 intArrayOf(
                     Color.WHITE,
                     Color.WHITE,
@@ -756,21 +1058,91 @@ class FaceSwapEngine(
                 ),
                 floatArrayOf(
                     0f,
-                    0.62f,
+                    0.68f,
                     1f
                 ),
                 Shader.TileMode.CLAMP
             )
 
-        canvas.drawRect(
+        maskCanvas.drawRect(
             0f,
             0f,
             256f,
             256f,
+            maskPaint
+        )
+
+        /*
+         * Apply the mask to the generated face
+         * before transforming it back.
+         */
+        val masked =
+            Bitmap.createBitmap(
+                256,
+                256,
+                Bitmap.Config.ARGB_8888
+            )
+
+        val maskedCanvas =
+            Canvas(masked)
+
+        maskedCanvas.drawBitmap(
+            swapped,
+            0f,
+            0f,
+            null
+        )
+
+        val maskApplyPaint =
+            Paint(
+                Paint.ANTI_ALIAS_FLAG
+            )
+
+        maskApplyPaint.xfermode =
+            PorterDuffXfermode(
+                PorterDuff.Mode.DST_IN
+            )
+
+        maskedCanvas.drawBitmap(
+            mask,
+            0f,
+            0f,
+            maskApplyPaint
+        )
+
+        maskApplyPaint.xfermode = null
+
+        /*
+         * Paste the masked result back into the
+         * original full-resolution target.
+         */
+        val result =
+            target.copy(
+                Bitmap.Config.ARGB_8888,
+                true
+            )
+
+        val resultCanvas =
+            Canvas(result)
+
+        val paint =
+            Paint(
+                Paint.ANTI_ALIAS_FLAG or
+                        Paint.FILTER_BITMAP_FLAG
+            )
+
+        resultCanvas.drawBitmap(
+            masked,
+            inverse,
             paint
         )
 
-        return mask
+        aligned.bitmap.recycle()
+        swapped.recycle()
+        masked.recycle()
+        mask.recycle()
+
+        return result
     }
 
     fun close() {
