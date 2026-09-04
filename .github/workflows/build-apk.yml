@@ -63,6 +63,74 @@ jobs:
           echo "Downloaded AI models:"
           ls -lh app/src/main/assets/models/
 
+      - name: Install ONNX inspection tool
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install onnx
+
+      - name: Inspect HyperSwap and ArcFace
+        run: |
+          python3 - <<'PY'
+          import onnx
+
+          files = [
+              "app/src/main/assets/models/arcface_w600k_r50.onnx",
+              "app/src/main/assets/models/hyperswap_1a_256.onnx"
+          ]
+
+          for path in files:
+              print("")
+              print("=" * 80)
+              print("MODEL:", path)
+              print("=" * 80)
+
+              model = onnx.load(path)
+
+              print("INPUTS:")
+              for x in model.graph.input:
+                  shape = []
+                  tensor_type = x.type.tensor_type
+
+                  for d in tensor_type.shape.dim:
+                      if d.dim_value:
+                          shape.append(d.dim_value)
+                      elif d.dim_param:
+                          shape.append(d.dim_param)
+                      else:
+                          shape.append("?")
+
+                  print(
+                      "  ",
+                      x.name,
+                      "shape=",
+                      shape,
+                      "type=",
+                      tensor_type.elem_type
+                  )
+
+              print("OUTPUTS:")
+              for x in model.graph.output:
+                  shape = []
+                  tensor_type = x.type.tensor_type
+
+                  for d in tensor_type.shape.dim:
+                      if d.dim_value:
+                          shape.append(d.dim_value)
+                      elif d.dim_param:
+                          shape.append(d.dim_param)
+                      else:
+                          shape.append("?")
+
+                  print(
+                      "  ",
+                      x.name,
+                      "shape=",
+                      shape,
+                      "type=",
+                      tensor_type.elem_type
+                  )
+          PY
+
       - name: Build APK
         run: |
           gradle assembleDebug --no-daemon
