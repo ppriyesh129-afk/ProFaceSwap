@@ -1,16 +1,20 @@
 package com.profaceswap
 
-import ai.onnxruntime.OnnxTensor
-import ai.onnxruntime.OrtEnvironment
-import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtSession
 import java.nio.FloatBuffer
+import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sqrt
 
 class FaceSwapEngine(
@@ -18,75 +22,153 @@ class FaceSwapEngine(
 ) {
 
     companion object {
-        private const val TAG = "ProFaceSwapEngine"
-        private const val ARC_SIZE = 112
-        private const val HYPER_SIZE = 256
+
+        private const val LANDMARK_MODEL =
+            "face_landmarker_Nx3x256x256.onnx"
+
+        private const val DETECTION_MODEL =
+            "face_detection_short_range.onnx"
+
+        private const val ARCFACE_MODEL =
+            "arcface_w600k_r50.onnx"
+
+        private const val HYPERSWAP_MODEL =
+            "hyperswap_1a_256.onnx"
+
+        private const val FACE_SIZE =
+            256
+
+        private const val ARCFACE_SIZE =
+            112
+
+        /*
+         * Adaptive blending limits.
+         *
+         * These are deliberately moderate.
+         * The target landmark hull is the final safety boundary,
+         * so the mask cannot expand outside the target face.
+         */
+        private const val MAX_EXPAND_X =
+            22
+
+        private const val MAX_EXPAND_Y =
+            20
+
+        private const val MIN_EXPAND =
+            2
+
+        private const val MASK_BLUR_RADIUS =
+            7
+
+        /*
+         * Small inward safety margin.
+         * Prevents the final mask from reaching too far into
+         * hair/background while still following the target face.
+         */
+        private const val HULL_SHRINK =
+            3.5f
+
+        /*
+         * Strength of the final alpha.
+         * Keeping this below 1 helps avoid a pasted-on appearance.
+         */
+        private const val MAX_ALPHA =
+            0.97f
     }
 
     private val environment =
         OrtEnvironment.getEnvironment()
 
-    private var detectorSession: OrtSession? = null
-    private var landmarkerSession: OrtSession? = null
-    private var arcFaceSession: OrtSession? = null
-    private var hyperSwapSession: OrtSession? = null
+    private var detectorSession: OrtSession? =
+        null
+
+    private var landmarkerSession: OrtSession? =
+        null
+
+    private var arcFaceSession: OrtSession? =
+        null
+
+    private var hyperSwapSession: OrtSession? =
+        null
+
+    private var hyperSwapLoaded =
+        false
+
+    private var closed =
+        false
 
     fun loadModels(): Boolean {
+
         return try {
 
             detectorSession =
                 createSession(
-                    "models/face_detection_short_range.onnx"
+                    DETECTION_MODEL
                 )
 
             landmarkerSession =
                 createSession(
-                    "models/face_landmarker_Nx3x256x256.onnx"
+                    LANDMARK_MODEL
                 )
 
             arcFaceSession =
                 createSession(
-                    "models/arcface_w600k_r50.onnx"
+                    ARCFACE_MODEL
                 )
 
             true
 
         } catch (e: Throwable) {
 
-            android.util.Log.e(
-                TAG,
-                "MODEL LOAD ERROR",
-                e
-            )
+            e.printStackTrace()
 
             false
         }
     }
 
     private fun loadHyperSwap(): Boolean {
-        return try {
 
-            if (hyperSwapSession != null) {
-                return true
-            }
+        if (hyperSwapLoaded &&
+            hyperSwapSession != null
+        ) {
+            return true
+        }
+
+        return try {
 
             hyperSwapSession =
                 createSession(
-                    "models/hyperswap_1a_256.onnx"
+                    HYPERSWAP_MODEL
                 )
+
+            hyperSwapLoaded =
+                true
 
             true
 
         } catch (e: Throwable) {
 
-            android.util.Log.e(
-                TAG,
-                "HYPERSWAP LOAD ERROR",
-                e
-            )
+            e.printStackTrace()
 
             false
         }
+    }
+
+    private fun createSession(
+        assetName: String
+    ): OrtSession {
+
+        val modelBytes =
+            context.assets
+                .open(assetName)
+                .use { input ->
+                    input.readBytes()
+                }
+
+        return environment.createSession(
+            modelBytes,
+            OrtSession.SessionOptions()
+        )
     }
 
     fun processSwap(
@@ -94,45 +176,24 @@ class FaceSwapEngine(
         source: Bitmap
     ): Bitmap {
 
-        val detector =
-            detectorSession
-                ?: throw IllegalStateException(
-                    "BlazeFace is not loaded"
-                )
-
-        val landmarker =
-            landmarkerSession
-                ?: throw IllegalStateException(
-                    "Face Landmarker is not loaded"
-                )
-
-        val arcFace =
-            arcFaceSession
-                ?: throw IllegalStateException(
-                    "ArcFace is not loaded"
-                )
+        check(!closed) {
+            "FaceSwapEngine is closed"
+        }
 
         if (!loadHyperSwap()) {
             throw IllegalStateException(
-                "HyperSwap could not be loaded"
+                "Could not load HyperSwap model"
             )
         }
 
-        val hyperSwap =
-            hyperSwapSession
-                ?: throw IllegalStateException(
-                    "HyperSwap is not loaded"
-                )
-
-        val faceDetector =
-            BlazeFaceDetector(
-                detector
-            )
-
+        /*
+         * Detect faces.
+         */
         val sourceFaces =
-            faceDetector.detect(
-                source
-            )
+            detectFaces(source)
+
+        val targetFaces =
+            detectFaces(target)
 
         if (sourceFaces.isEmpty()) {
             throw IllegalStateException(
@@ -140,364 +201,366 @@ class FaceSwapEngine(
             )
         }
 
-        val targetFaces =
-            faceDetector.detect(
-                target
-            )
-
         if (targetFaces.isEmpty()) {
             throw IllegalStateException(
                 "No face found in target image"
             )
         }
 
+        /*
+         * Use the largest face in each image.
+         */
         val sourceFace =
-            largestFace(
-                sourceFaces
-            )
+            sourceFaces.maxByOrNull {
+                it.area()
+            }
+                ?: throw IllegalStateException(
+                    "Could not select source face"
+                )
 
         val targetFace =
-            largestFace(
-                targetFaces
+            targetFaces.maxByOrNull {
+                it.area()
+            }
+                ?: throw IllegalStateException(
+                    "Could not select target face"
+                )
+
+        /*
+         * Get 478 landmarks.
+         */
+        val sourceLandmarks =
+            detectLandmarks(
+                source,
+                sourceFace
             )
 
-        val sourceAligned =
+        val targetLandmarks =
+            detectLandmarks(
+                target,
+                targetFace
+            )
+
+        if (sourceLandmarks.size < 400) {
+            throw IllegalStateException(
+                "Source face landmarks unavailable"
+            )
+        }
+
+        if (targetLandmarks.size < 400) {
+            throw IllegalStateException(
+                "Target face landmarks unavailable"
+            )
+        }
+
+        /*
+         * Align both faces to the HyperSwap 256x256 template.
+         */
+        val sourcePrepared =
             prepareFace(
                 source,
                 sourceFace,
-                landmarker
+                sourceLandmarks
             )
 
-        val targetAligned =
+        val targetPrepared =
             prepareFace(
                 target,
                 targetFace,
-                landmarker
+                targetLandmarks
             )
 
-        try {
-
-            val sourceEmbedding =
-                createArcFaceEmbedding(
-                    sourceAligned.bitmap,
-                    arcFace
-                )
-
-            val swap =
-                runHyperSwap(
-                    sourceEmbedding,
-                    targetAligned.bitmap,
-                    hyperSwap
-                )
-
-            return pasteBack(
-                original = target,
-                swap = swap,
-                transform = targetAligned.transform
+        /*
+         * ArcFace source identity embedding.
+         */
+        val sourceEmbedding =
+            createArcFaceEmbedding(
+                sourcePrepared.bitmap
             )
 
-        } finally {
+        /*
+         * HyperSwap.
+         */
+        val swapResult =
+            runHyperSwap(
+                targetPrepared.bitmap,
+                sourceEmbedding
+            )
 
-            sourceAligned.bitmap.recycle()
-            targetAligned.bitmap.recycle()
-        }
+        /*
+         * IMPORTANT:
+         *
+         * Create a target-specific blending mask from all
+         * 478 target landmarks.
+         *
+         * This is what makes the new version adaptive.
+         */
+        val targetFaceMask =
+            createTargetFaceMask(
+                targetPrepared.alignedLandmarks
+            )
+
+        /*
+         * Paste the HyperSwap result back using:
+         *
+         * HyperSwap mask
+         *        +
+         * adaptive expansion
+         *        +
+         * target landmark boundary
+         *        +
+         * feathering
+         */
+        return pasteBack(
+            originalTarget = target,
+            targetPrepared = targetPrepared,
+            swapResult = swapResult,
+            targetFaceMask = targetFaceMask
+        )
+    }
+
+    private fun detectFaces(
+        bitmap: Bitmap
+    ): List<DetectedFace> {
+
+        val session =
+            detectorSession
+                ?: throw IllegalStateException(
+                    "Face detector not loaded"
+                )
+
+        /*
+         * The existing detector implementation in the project
+         * is expected to provide this preprocessing/output.
+         *
+         * We keep the detector interface unchanged.
+         */
+        return FaceDetection.detect(
+            bitmap,
+            session,
+            environment
+        )
+    }
+
+    private fun detectLandmarks(
+        bitmap: Bitmap,
+        face: DetectedFace
+    ): Array<FloatArray> {
+
+        val session =
+            landmarkerSession
+                ?: throw IllegalStateException(
+                    "Face landmarker not loaded"
+                )
+
+        return FaceLandmarker.detect(
+            bitmap,
+            face,
+            session,
+            environment
+        )
     }
 
     private fun prepareFace(
         bitmap: Bitmap,
-        detection: BlazeFaceResult,
-        landmarkerSession: OrtSession
+        face: DetectedFace,
+        landmarks: Array<FloatArray>
     ): PreparedFace {
 
-        val faceLandmarker =
-            FaceLandmarker(
-                landmarkerSession
-            )
-
-        val width =
-            detection.right -
-                    detection.left
-
-        val height =
-            detection.bottom -
-                    detection.top
-
-        val faceSize =
-            max(
-                width,
-                height
-            )
-
-        if (faceSize <= 1f) {
-            throw IllegalStateException(
-                "Invalid face size"
-            )
-        }
-
-        val roiSize =
-            faceSize * 1.5f
+        /*
+         * Use the same 1.5x face ROI strategy as the working version.
+         */
+        val faceRect =
+            face.rect
 
         val centerX =
-            (
-                detection.left +
-                        detection.right
-                ) * 0.5f
+            faceRect.centerX()
 
         val centerY =
-            (
-                detection.top +
-                        detection.bottom
-                ) * 0.5f
+            faceRect.centerY()
 
-        var roiLeft =
-            centerX -
-                    roiSize * 0.5f
+        val width =
+            faceRect.width()
 
-        var roiTop =
-            centerY -
-                    roiSize * 0.5f
-
-        var roiRight =
-            centerX +
-                    roiSize * 0.5f
-
-        var roiBottom =
-            centerY +
-                    roiSize * 0.5f
-
-        if (roiLeft < 0f) {
-
-            val difference =
-                -roiLeft
-
-            roiLeft = 0f
-            roiRight += difference
-        }
-
-        if (roiTop < 0f) {
-
-            val difference =
-                -roiTop
-
-            roiTop = 0f
-            roiBottom += difference
-        }
-
-        if (
-            roiRight >
-            bitmap.width.toFloat()
-        ) {
-
-            val difference =
-                roiRight -
-                        bitmap.width.toFloat()
-
-            roiRight =
-                bitmap.width.toFloat()
-
-            roiLeft -= difference
-        }
-
-        if (
-            roiBottom >
-            bitmap.height.toFloat()
-        ) {
-
-            val difference =
-                roiBottom -
-                        bitmap.height.toFloat()
-
-            roiBottom =
-                bitmap.height.toFloat()
-
-            roiTop -= difference
-        }
-
-        roiLeft =
-            roiLeft.coerceIn(
-                0f,
-                bitmap.width.toFloat() - 1f
-            )
-
-        roiTop =
-            roiTop.coerceIn(
-                0f,
-                bitmap.height.toFloat() - 1f
-            )
-
-        roiRight =
-            roiRight.coerceIn(
-                roiLeft + 1f,
-                bitmap.width.toFloat()
-            )
-
-        roiBottom =
-            roiBottom.coerceIn(
-                roiTop + 1f,
-                bitmap.height.toFloat()
-            )
-
-        val cropLeft =
-            roiLeft.toInt()
-
-        val cropTop =
-            roiTop.toInt()
+        val height =
+            faceRect.height()
 
         val cropWidth =
-            max(
-                1,
-                (
-                    roiRight -
-                            roiLeft
-                    ).toInt()
-            ).coerceAtMost(
-                bitmap.width -
-                        cropLeft
-            )
+            width * 1.5f
 
         val cropHeight =
-            max(
-                1,
-                (
-                    roiBottom -
-                            roiTop
-                    ).toInt()
-            ).coerceAtMost(
-                bitmap.height -
-                        cropTop
+            height * 1.5f
+
+        val left =
+            (centerX - cropWidth / 2f)
+                .coerceAtLeast(0f)
+
+        val top =
+            (centerY - cropHeight / 2f)
+                .coerceAtLeast(0f)
+
+        val right =
+            (centerX + cropWidth / 2f)
+                .coerceAtMost(
+                    bitmap.width.toFloat()
+                )
+
+        val bottom =
+            (centerY + cropHeight / 2f)
+                .coerceAtMost(
+                    bitmap.height.toFloat()
+                )
+
+        val cropRect =
+            RectF(
+                left,
+                top,
+                right,
+                bottom
             )
 
         val crop =
             Bitmap.createBitmap(
                 bitmap,
-                cropLeft,
-                cropTop,
-                cropWidth,
-                cropHeight
+                cropRect.left.toInt(),
+                cropRect.top.toInt(),
+                cropRect.width().toInt()
+                    .coerceAtLeast(1),
+                cropRect.height().toInt()
+                    .coerceAtLeast(1)
             )
 
-        val rawLandmarks =
-            faceLandmarker.detect(
-                crop
-            )
-
-        if (rawLandmarks.size < 292) {
-
-            crop.recycle()
-
-            throw IllegalStateException(
-                "Could not obtain 478 face landmarks"
-            )
-        }
-
-        val landmarks =
+        /*
+         * Convert original-image landmarks into crop coordinates.
+         */
+        val cropLandmarks =
             Array(
-                rawLandmarks.size
+                landmarks.size
             ) { index ->
 
                 floatArrayOf(
+                    landmarks[index][0] -
+                            cropRect.left,
 
-                    rawLandmarks[index][0] *
-                            crop.width /
-                            256f,
-
-                    rawLandmarks[index][1] *
-                            crop.height /
-                            256f,
-
-                    if (
-                        rawLandmarks[index].size > 2
-                    ) {
-                        rawLandmarks[index][2]
-                    } else {
-                        0f
-                    }
+                    landmarks[index][1] -
+                            cropRect.top
                 )
             }
 
-        for (point in landmarks) {
+        /*
+         * Five-point alignment.
+         */
+        val fivePoints =
+            FaceAlignment.fivePoints(
+                cropLandmarks
+            )
 
-            point[0] +=
-                cropLeft.toFloat()
-
-            point[1] +=
-                cropTop.toFloat()
-        }
-
-        crop.recycle()
-
-        val matrix =
-            calculateSimilarityTransform(
-                FaceAlignment.fivePoints(
-                    landmarks
+        val template =
+            arrayOf(
+                floatArrayOf(
+                    84.87f,
+                    105.94f
                 ),
-                hyperSwapTemplate()
+                floatArrayOf(
+                    171.13f,
+                    105.94f
+                ),
+                floatArrayOf(
+                    128.0f,
+                    146.66f
+                ),
+                floatArrayOf(
+                    96.95f,
+                    188.64f
+                ),
+                floatArrayOf(
+                    159.05f,
+                    188.64f
+                )
+            )
+
+        val transform =
+            calculateSimilarityTransform(
+                fivePoints,
+                template
             )
 
         val aligned =
             warpBitmap(
-                bitmap = bitmap,
-                matrix = matrix,
-                outputSize = HYPER_SIZE
+                crop,
+                transform,
+                FACE_SIZE,
+                FACE_SIZE
             )
+
+        /*
+         * Transform ALL 478 landmarks into aligned 256x256 space.
+         *
+         * This is the important new part.
+         */
+        val alignedLandmarks =
+            Array(
+                cropLandmarks.size
+            ) { index ->
+
+                floatArrayOf(
+                    cropLandmarks[index][0],
+                    cropLandmarks[index][1]
+                )
+            }
+
+        val landmarkArray =
+            FloatArray(
+                alignedLandmarks.size * 2
+            )
+
+        for (i in alignedLandmarks.indices) {
+
+            landmarkArray[i * 2] =
+                alignedLandmarks[i][0]
+
+            landmarkArray[i * 2 + 1] =
+                alignedLandmarks[i][1]
+        }
+
+        transform.mapPoints(
+            landmarkArray
+        )
+
+        for (i in alignedLandmarks.indices) {
+
+            alignedLandmarks[i][0] =
+                landmarkArray[i * 2]
+
+            alignedLandmarks[i][1] =
+                landmarkArray[i * 2 + 1]
+        }
+
+        crop.recycle()
 
         return PreparedFace(
             bitmap = aligned,
-            transform = matrix
-        )
-    }
-
-    private fun hyperSwapTemplate():
-        Array<FloatArray> {
-
-        return arrayOf(
-
-            floatArrayOf(
-                84.87f,
-                105.94f
-            ),
-
-            floatArrayOf(
-                171.13f,
-                105.94f
-            ),
-
-            floatArrayOf(
-                128.00f,
-                146.66f
-            ),
-
-            floatArrayOf(
-                96.95f,
-                188.64f
-            ),
-
-            floatArrayOf(
-                159.05f,
-                188.64f
-            )
+            transform = transform,
+            alignedLandmarks = alignedLandmarks
         )
     }
 
     private fun warpBitmap(
-        bitmap: Bitmap,
-        matrix: Matrix,
-        outputSize: Int
+        source: Bitmap,
+        transform: Matrix,
+        width: Int,
+        height: Int
     ): Bitmap {
 
         val output =
             Bitmap.createBitmap(
-                outputSize,
-                outputSize,
+                width,
+                height,
                 Bitmap.Config.ARGB_8888
             )
 
         val canvas =
             Canvas(output)
-
-        canvas.drawColor(
-            Color.BLACK
-        )
 
         val paint =
             Paint(
@@ -506,8 +569,8 @@ class FaceSwapEngine(
             )
 
         canvas.drawBitmap(
-            bitmap,
-            matrix,
+            source,
+            transform,
             paint
         )
 
@@ -515,1047 +578,961 @@ class FaceSwapEngine(
     }
 
     private fun calculateSimilarityTransform(
-        source: Array<FloatArray>,
-        target: Array<FloatArray>
+        sourcePoints: Array<FloatArray>,
+        targetPoints: Array<FloatArray>
     ): Matrix {
 
-        if (
-            source.size != 5 ||
-            target.size != 5
+        if (sourcePoints.size != 5 ||
+            targetPoints.size != 5
         ) {
-            throw IllegalStateException(
-                "Five landmarks are required"
+            throw IllegalArgumentException(
+                "Exactly five points are required"
             )
         }
 
-        var sourceCx = 0.0
-        var sourceCy = 0.0
-        var targetCx = 0.0
-        var targetCy = 0.0
+        /*
+         * Least-squares similarity transform.
+         *
+         * x' = a*x - b*y + tx
+         * y' = b*x + a*y + ty
+         */
+        var srcMeanX =
+            0.0
+
+        var srcMeanY =
+            0.0
+
+        var dstMeanX =
+            0.0
+
+        var dstMeanY =
+            0.0
 
         for (i in 0 until 5) {
 
-            sourceCx +=
-                source[i][0].toDouble()
+            srcMeanX +=
+                sourcePoints[i][0]
 
-            sourceCy +=
-                source[i][1].toDouble()
+            srcMeanY +=
+                sourcePoints[i][1]
 
-            targetCx +=
-                target[i][0].toDouble()
+            dstMeanX +=
+                targetPoints[i][0]
 
-            targetCy +=
-                target[i][1].toDouble()
+            dstMeanY +=
+                targetPoints[i][1]
         }
 
-        sourceCx /= 5.0
-        sourceCy /= 5.0
-        targetCx /= 5.0
-        targetCy /= 5.0
+        srcMeanX /= 5.0
+        srcMeanY /= 5.0
 
-        var a = 0.0
-        var b = 0.0
-        var denominator = 0.0
+        dstMeanX /= 5.0
+        dstMeanY /= 5.0
+
+        var numA =
+            0.0
+
+        var numB =
+            0.0
+
+        var denominator =
+            0.0
 
         for (i in 0 until 5) {
 
             val sx =
-                source[i][0].toDouble() -
-                        sourceCx
+                sourcePoints[i][0] -
+                        srcMeanX
 
             val sy =
-                source[i][1].toDouble() -
-                        sourceCy
+                sourcePoints[i][1] -
+                        srcMeanY
 
-            val tx =
-                target[i][0].toDouble() -
-                        targetCx
+            val dx =
+                targetPoints[i][0] -
+                        dstMeanX
 
-            val ty =
-                target[i][1].toDouble() -
-                        targetCy
+            val dy =
+                targetPoints[i][1] -
+                        dstMeanY
 
-            a +=
-                sx * tx +
-                        sy * ty
+            numA +=
+                sx * dx +
+                        sy * dy
 
-            b +=
-                sx * ty -
-                        sy * tx
+            numB +=
+                sx * dy -
+                        sy * dx
 
             denominator +=
                 sx * sx +
                         sy * sy
         }
 
-        if (
-            denominator <
-            0.000001
-        ) {
+        if (denominator < 1e-8) {
             throw IllegalStateException(
-                "Face alignment failed"
+                "Invalid face alignment"
             )
         }
 
-        val magnitude =
-            sqrt(
-                a * a +
-                        b * b
-            )
+        val a =
+            numA / denominator
 
-        if (
-            magnitude <
-            0.000001
-        ) {
-            throw IllegalStateException(
-                "Invalid alignment magnitude"
+        val b =
+            numB / denominator
+
+        val tx =
+            dstMeanX -
+                    a * srcMeanX +
+                    b * srcMeanY
+
+        val ty =
+            dstMeanY -
+                    b * srcMeanX -
+                    a * srcMeanY
+
+        return Matrix().apply {
+
+            setValues(
+                floatArrayOf(
+                    a.toFloat(),
+                    (-b).toFloat(),
+                    tx.toFloat(),
+
+                    b.toFloat(),
+                    a.toFloat(),
+                    ty.toFloat(),
+
+                    0f,
+                    0f,
+                    1f
+                )
             )
         }
-
-        val scale =
-            magnitude /
-                    denominator
-
-        val cos =
-            a /
-                    magnitude
-
-        val sin =
-            b /
-                    magnitude
-
-        val translateX =
-            targetCx -
-                    scale *
-                    (
-                        cos * sourceCx -
-                                sin * sourceCy
-                        )
-
-        val translateY =
-            targetCy -
-                    scale *
-                    (
-                        sin * sourceCx +
-                                cos * sourceCy
-                        )
-
-        val matrix =
-            Matrix()
-
-        matrix.setValues(
-            floatArrayOf(
-
-                (scale * cos).toFloat(),
-                (-scale * sin).toFloat(),
-                translateX.toFloat(),
-
-                (scale * sin).toFloat(),
-                (scale * cos).toFloat(),
-                translateY.toFloat(),
-
-                0f,
-                0f,
-                1f
-            )
-        )
-
-        return matrix
     }
 
     private fun createArcFaceEmbedding(
-        face: Bitmap,
-        session: OrtSession
+        bitmap: Bitmap
     ): FloatArray {
 
-        val resized =
+        val session =
+            arcFaceSession
+                ?: throw IllegalStateException(
+                    "ArcFace model not loaded"
+                )
+
+        val input =
             Bitmap.createScaledBitmap(
-                face,
-                ARC_SIZE,
-                ARC_SIZE,
+                bitmap,
+                ARCFACE_SIZE,
+                ARCFACE_SIZE,
                 true
             )
 
-        val pixels =
-            IntArray(
-                ARC_SIZE *
-                        ARC_SIZE
+        val data =
+            FloatArray(
+                1 * 3 *
+                        ARCFACE_SIZE *
+                        ARCFACE_SIZE
             )
 
-        resized.getPixels(
-            pixels,
-            0,
-            ARC_SIZE,
-            0,
-            0,
-            ARC_SIZE,
-            ARC_SIZE
-        )
+        var index =
+            0
 
-        val buffer =
-            FloatBuffer.allocate(
-                3 *
-                        ARC_SIZE *
-                        ARC_SIZE
-            )
+        /*
+         * RGB CHW, normalized [-1, 1].
+         */
+        for (channel in 0 until 3) {
 
-        for (channel in 0..2) {
+            for (y in 0 until ARCFACE_SIZE) {
 
-            for (pixel in pixels) {
+                for (x in 0 until ARCFACE_SIZE) {
 
-                val value =
-                    when (channel) {
+                    val pixel =
+                        input.getPixel(
+                            x,
+                            y
+                        )
 
-                        0 ->
-                            (pixel shr 16) and
-                                    0xFF
+                    val value =
+                        when (channel) {
 
-                        1 ->
-                            (pixel shr 8) and
-                                    0xFF
+                            0 ->
+                                Color.red(
+                                    pixel
+                                )
 
-                        else ->
-                            pixel and
-                                    0xFF
-                    }
+                            1 ->
+                                Color.green(
+                                    pixel
+                                )
 
-                buffer.put(
-                    value /
-                            127.5f -
-                            1f
-                )
+                            else ->
+                                Color.blue(
+                                    pixel
+                                )
+                        }
+
+                    data[index++] =
+                        value / 127.5f -
+                                1.0f
+                }
             }
         }
 
-        buffer.rewind()
+        input.recycle()
+
+        val inputName =
+            session.inputNames
+                .first()
 
         val tensor =
             OnnxTensor.createTensor(
                 environment,
-                buffer,
+                FloatBuffer.wrap(data),
                 longArrayOf(
                     1,
                     3,
-                    ARC_SIZE.toLong(),
-                    ARC_SIZE.toLong()
+                    ARCFACE_SIZE.toLong(),
+                    ARCFACE_SIZE.toLong()
                 )
             )
 
-        try {
+        tensor.use {
 
-            val result =
-                session.run(
-                    mapOf(
-                        session.inputNames.first() to
-                                tensor
-                    )
+            session.run(
+                mapOf(
+                    inputName to tensor
                 )
+            ).use { results ->
 
-            try {
-
-                val embedding =
+                val output =
                     extractFloatArray(
-                        result[0].value
+                        results[0].value
                     )
 
-                if (
-                    embedding.size != 512
-                ) {
-
+                if (output.isEmpty()) {
                     throw IllegalStateException(
-                        "ArcFace returned " +
-                                "${embedding.size} values"
+                        "ArcFace returned empty embedding"
                     )
                 }
 
-                return normalizeEmbedding(
-                    embedding
-                )
+                /*
+                 * L2 normalize.
+                 */
+                var norm =
+                    0.0
 
-            } finally {
+                for (v in output) {
+                    norm +=
+                        v.toDouble() *
+                                v.toDouble()
+                }
 
-                result.close()
+                norm =
+                    sqrt(norm)
+
+                if (norm < 1e-12) {
+                    throw IllegalStateException(
+                        "Invalid ArcFace embedding"
+                    )
+                }
+
+                return FloatArray(
+                    output.size
+                ) { i ->
+                    (
+                        output[i] /
+                                norm
+                        ).toFloat()
+                }
             }
-
-        } finally {
-
-            tensor.close()
-            resized.recycle()
         }
     }
 
     private fun runHyperSwap(
-        embedding: FloatArray,
-        targetFace: Bitmap,
-        session: OrtSession
+        target: Bitmap,
+        sourceEmbedding: FloatArray
     ): HyperSwapResult {
 
-        val pixels =
-            IntArray(
-                HYPER_SIZE *
-                        HYPER_SIZE
-            )
-
-        targetFace.getPixels(
-            pixels,
-            0,
-            HYPER_SIZE,
-            0,
-            0,
-            HYPER_SIZE,
-            HYPER_SIZE
-        )
-
-        val buffer =
-            FloatBuffer.allocate(
-                3 *
-                        HYPER_SIZE *
-                        HYPER_SIZE
-            )
-
-        for (channel in 0..2) {
-
-            for (pixel in pixels) {
-
-                val value =
-                    when (channel) {
-
-                        0 ->
-                            (pixel shr 16) and
-                                    0xFF
-
-                        1 ->
-                            (pixel shr 8) and
-                                    0xFF
-
-                        else ->
-                            pixel and
-                                    0xFF
-                    }
-
-                buffer.put(
-                    value /
-                            127.5f -
-                            1f
+        val session =
+            hyperSwapSession
+                ?: throw IllegalStateException(
+                    "HyperSwap model not loaded"
                 )
+
+        val imageData =
+            FloatArray(
+                1 * 3 *
+                        FACE_SIZE *
+                        FACE_SIZE
+            )
+
+        var index =
+            0
+
+        /*
+         * RGB CHW, normalized [-1, 1].
+         */
+        for (channel in 0 until 3) {
+
+            for (y in 0 until FACE_SIZE) {
+
+                for (x in 0 until FACE_SIZE) {
+
+                    val pixel =
+                        target.getPixel(
+                            x,
+                            y
+                        )
+
+                    val value =
+                        when (channel) {
+
+                            0 ->
+                                Color.red(
+                                    pixel
+                                )
+
+                            1 ->
+                                Color.green(
+                                    pixel
+                                )
+
+                            else ->
+                                Color.blue(
+                                    pixel
+                                )
+                        }
+
+                    imageData[index++] =
+                        value / 127.5f -
+                                1.0f
+                }
             }
         }
 
-        buffer.rewind()
-
-        val sourceTensor =
+        val imageTensor =
             OnnxTensor.createTensor(
                 environment,
                 FloatBuffer.wrap(
-                    embedding
+                    imageData
                 ),
                 longArrayOf(
                     1,
-                    512
+                    3,
+                    FACE_SIZE.toLong(),
+                    FACE_SIZE.toLong()
                 )
             )
 
-        val targetTensor =
+        val embeddingTensor =
             OnnxTensor.createTensor(
                 environment,
-                buffer,
+                FloatBuffer.wrap(
+                    sourceEmbedding
+                ),
                 longArrayOf(
                     1,
-                    3,
-                    HYPER_SIZE.toLong(),
-                    HYPER_SIZE.toLong()
+                    sourceEmbedding.size.toLong()
                 )
             )
 
-        try {
+        imageTensor.use {
+            embeddingTensor.use {
 
-            val result =
+                val inputNames =
+                    session.inputNames
+                        .toList()
+
+                if (inputNames.size < 2) {
+                    throw IllegalStateException(
+                        "Unexpected HyperSwap inputs"
+                    )
+                }
+
+                /*
+                 * HyperSwap 1a expects:
+                 *
+                 * image:  [1,3,256,256]
+                 * source: [1,512]
+                 */
+                val inputs =
+                    HashMap<String, OnnxTensor>()
+
+                inputs[
+                    inputNames[0]
+                ] =
+                    imageTensor
+
+                inputs[
+                    inputNames[1]
+                ] =
+                    embeddingTensor
+
                 session.run(
-                    mapOf(
-                        "source" to
-                                sourceTensor,
+                    inputs
+                ).use { results ->
 
-                        "target" to
-                                targetTensor
-                    )
-                )
+                    if (results.size < 2) {
+                        throw IllegalStateException(
+                            "HyperSwap returned insufficient outputs"
+                        )
+                    }
 
-            try {
+                    val imageOutput =
+                        extractFloatArray(
+                            results[0].value
+                        )
 
-                if (result.size() < 2) {
+                    val maskOutput =
+                        extractFloatArray(
+                            results[1].value
+                        )
 
-                    throw IllegalStateException(
-                        "HyperSwap returned " +
-                                "${result.size()} outputs"
-                    )
-                }
-
-                val image =
-                    extractFloatArray(
-                        result[0].value
-                    )
-
-                val mask =
-                    extractFloatArray(
-                        result[1].value
-                    )
-
-                val expectedImage =
-                    3 *
-                            HYPER_SIZE *
-                            HYPER_SIZE
-
-                val expectedMask =
-                    HYPER_SIZE *
-                            HYPER_SIZE
-
-                if (
-                    image.size !=
-                    expectedImage
-                ) {
-
-                    throw IllegalStateException(
-                        "Invalid HyperSwap image output: " +
-                                "${image.size} values"
-                    )
-                }
-
-                if (
-                    mask.size <
-                    expectedMask
-                ) {
-
-                    throw IllegalStateException(
-                        "Invalid HyperSwap mask output: " +
-                                "${mask.size} values"
-                    )
-                }
-
-                return HyperSwapResult(
-                    bitmap =
+                    val outputBitmap =
                         imageToBitmap(
-                            image
-                        ),
-                    mask =
-                        mask
-                )
+                            imageOutput
+                        )
 
-            } finally {
-
-                result.close()
+                    return HyperSwapResult(
+                        bitmap = outputBitmap,
+                        mask = maskOutput
+                    )
+                }
             }
-
-        } finally {
-
-            sourceTensor.close()
-            targetTensor.close()
         }
     }
 
     /*
-     * FIX:
-     *
-     * HyperSwap image output:
-     * [1, 3, 256, 256]
-     *
-     * HyperSwap mask output:
-     * [1, 1, 256, 256]
-     *
-     * These arrive as nested Java arrays.
-     *
-     * This function recursively walks all
-     * array levels.
+     * ============================================================
+     * ADAPTIVE TARGET FACE MASK
+     * ============================================================
      */
 
-    private fun extractFloatArray(
-        raw: Any
+    private fun createTargetFaceMask(
+        landmarks: Array<FloatArray>
     ): FloatArray {
 
-        if (raw is FloatArray) {
-            return raw
-        }
-
-        if (raw is DoubleArray) {
-
-            return FloatArray(
-                raw.size
-            ) { index ->
-                raw[index].toFloat()
-            }
-        }
-
-        if (raw is Array<*>) {
-
-            val values =
-                ArrayList<Float>()
-
-            for (item in raw) {
-
-                if (item != null) {
-
-                    appendTensorValues(
-                        item,
-                        values
-                    )
-                }
-            }
-
-            if (values.isEmpty()) {
-
-                throw IllegalStateException(
-                    "Tensor output contained no values"
-                )
-            }
-
-            return FloatArray(
-                values.size
-            ) { index ->
-                values[index]
-            }
-        }
-
-        throw IllegalStateException(
-            "Unexpected tensor output type: " +
-                    raw.javaClass.name
-        )
-    }
-
-    private fun appendTensorValues(
-        value: Any,
-        output: ArrayList<Float>
-    ) {
-
-        when (value) {
-
-            is FloatArray -> {
-
-                for (number in value) {
-                    output.add(number)
-                }
-            }
-
-            is DoubleArray -> {
-
-                for (number in value) {
-                    output.add(
-                        number.toFloat()
-                    )
-                }
-            }
-
-            is Array<*> -> {
-
-                for (item in value) {
-
-                    if (item != null) {
-
-                        appendTensorValues(
-                            item,
-                            output
-                        )
-                    }
-                }
-            }
-
-            else -> {
-
-                throw IllegalStateException(
-                    "Unexpected nested tensor type: " +
-                            value.javaClass.name
-                )
-            }
-        }
-    }
-
-    private fun normalizeEmbedding(
-        values: FloatArray
-    ): FloatArray {
-
-        var sum = 0.0
-
-        for (value in values) {
-
-            sum +=
-                value.toDouble() *
-                        value.toDouble()
-        }
-
-        val norm =
-            sqrt(
-                sum
-            ).toFloat()
-
-        if (
-            norm <
-            0.000001f
-        ) {
-
-            throw IllegalStateException(
-                "Invalid ArcFace embedding"
-            )
-        }
-
-        return FloatArray(
-            values.size
-        ) { index ->
-
-            values[index] /
-                    norm
-        }
-    }
-
-    private fun largestFace(
-        faces: List<BlazeFaceResult>
-    ): BlazeFaceResult {
-
-        return faces.maxByOrNull {
-
-            val width =
-                max(
-                    0f,
-                    it.right -
-                            it.left
-                )
-
-            val height =
-                max(
-                    0f,
-                    it.bottom -
-                            it.top
-                )
-
-            width * height
-
-        } ?: throw IllegalStateException(
-            "No usable face found"
-        )
-    }
-
-    private fun createSession(
-        assetPath: String
-    ): OrtSession {
-
-        val file =
-            java.io.File(
-                context.cacheDir,
-                assetPath.substringAfterLast(
-                    "/"
-                )
+        val points =
+            ArrayList<Point2D>(
+                landmarks.size
             )
 
-        if (!file.exists()) {
+        for (landmark in landmarks) {
 
-            context.assets
-                .open(
-                    assetPath
-                )
-                .use { input ->
+            if (landmark.size < 2) {
+                continue
+            }
 
-                    file.outputStream()
-                        .use { output ->
+            val x =
+                landmark[0]
 
-                            input.copyTo(
-                                output
+            val y =
+                landmark[1]
+
+            if (
+                x.isFinite() &&
+                y.isFinite()
+            ) {
+
+                if (
+                    x >= -10f &&
+                    x <= FACE_SIZE + 10f &&
+                    y >= -10f &&
+                    y <= FACE_SIZE + 10f
+                ) {
+
+                    points.add(
+                        Point2D(
+                            x.coerceIn(
+                                0f,
+                                FACE_SIZE - 1f
+                            ),
+                            y.coerceIn(
+                                0f,
+                                FACE_SIZE - 1f
                             )
-                        }
+                        )
+                    )
                 }
+            }
         }
 
-        return environment.createSession(
-            file.absolutePath,
-            OrtSession.SessionOptions()
-        )
-    }
+        if (points.size < 10) {
 
-    private fun imageToBitmap(
-        values: FloatArray
-    ): Bitmap {
-
-        val plane =
-            HYPER_SIZE *
-                    HYPER_SIZE
-
-        val expected =
-            plane * 3
-
-        if (
-            values.size !=
-            expected
-        ) {
-
-            throw IllegalStateException(
-                "Invalid HyperSwap image output: " +
-                        "${values.size} values"
-            )
+            /*
+             * Fallback to a broad face-shaped ellipse.
+             */
+            return createFallbackFaceMask()
         }
 
-        val pixels =
-            IntArray(
-                plane
+        val hull =
+            convexHull(
+                points
             )
 
-        for (
-            i in 0 until plane
-        ) {
-
-            val r =
-                (
-                    values[i] *
-                            127.5f +
-                            127.5f
-                    )
-                    .coerceIn(
-                        0f,
-                        255f
-                    )
-                    .toInt()
-
-            val g =
-                (
-                    values[plane + i] *
-                            127.5f +
-                            127.5f
-                    )
-                    .coerceIn(
-                        0f,
-                        255f
-                    )
-                    .toInt()
-
-            val b =
-                (
-                    values[plane * 2 + i] *
-                            127.5f +
-                            127.5f
-                    )
-                    .coerceIn(
-                        0f,
-                        255f
-                    )
-                    .toInt()
-
-            pixels[i] =
-                Color.rgb(
-                    r,
-                    g,
-                    b
-                )
-        }
-
-        val bitmap =
-            Bitmap.createBitmap(
-                HYPER_SIZE,
-                HYPER_SIZE,
-                Bitmap.Config.ARGB_8888
-            )
-
-        bitmap.setPixels(
-            pixels,
-            0,
-            HYPER_SIZE,
-            0,
-            0,
-            HYPER_SIZE,
-            HYPER_SIZE
-        )
-
-        return bitmap
-    }
-
-    private fun createMaskedSwap(
-        bitmap: Bitmap,
-        mask: FloatArray
-    ): Bitmap {
-
-        val size =
-            HYPER_SIZE * HYPER_SIZE
-
-        if (mask.size < size) {
-
-            throw IllegalStateException(
-                "Invalid HyperSwap mask: ${mask.size} values"
-            )
+        if (hull.size < 3) {
+            return createFallbackFaceMask()
         }
 
         /*
-         * STEP 1
+         * Find hull centroid.
+         */
+        var centerX =
+            0f
+
+        var centerY =
+            0f
+
+        for (point in hull) {
+
+            centerX +=
+                point.x
+
+            centerY +=
+                point.y
+        }
+
+        centerX /=
+            hull.size
+
+        centerY /=
+            hull.size
+
+        /*
+         * Slightly shrink the hull.
          *
-         * Soften the HyperSwap mask.
+         * This keeps the target-specific shape but removes
+         * a tiny amount around the extreme boundary.
+         */
+        val shrunkHull =
+            hull.map { point ->
+
+                val dx =
+                    point.x -
+                            centerX
+
+                val dy =
+                    point.y -
+                            centerY
+
+                val distance =
+                    sqrt(
+                        dx * dx +
+                                dy * dy
+                    )
+
+                if (distance < 1f) {
+
+                    Point2D(
+                        point.x,
+                        point.y
+                    )
+
+                } else {
+
+                    val scale =
+                        max(
+                            0f,
+                            (
+                                distance -
+                                        HULL_SHRINK
+                                ) /
+                                    distance
+                        )
+
+                    Point2D(
+                        centerX +
+                                dx * scale,
+
+                        centerY +
+                                dy * scale
+                    )
+                }
+            }
+
+        /*
+         * Rasterize the polygon.
+         */
+        val bitmap =
+            Bitmap.createBitmap(
+                FACE_SIZE,
+                FACE_SIZE,
+                Bitmap.Config.ARGB_8888
+            )
+
+        val canvas =
+            Canvas(bitmap)
+
+        val paint =
+            Paint(
+                Paint.ANTI_ALIAS_FLAG
+            )
+
+        paint.color =
+            Color.WHITE
+
+        paint.style =
+            Paint.Style.FILL
+
+        val path =
+            Path()
+
+        path.moveTo(
+            shrunkHull[0].x,
+            shrunkHull[0].y
+        )
+
+        for (i in 1 until shrunkHull.size) {
+
+            path.lineTo(
+                shrunkHull[i].x,
+                shrunkHull[i].y
+            )
+        }
+
+        path.close()
+
+        canvas.drawPath(
+            path,
+            paint
+        )
+
+        val pixels =
+            IntArray(
+                FACE_SIZE *
+                        FACE_SIZE
+            )
+
+        bitmap.getPixels(
+            pixels,
+            0,
+            FACE_SIZE,
+            0,
+            0,
+            FACE_SIZE,
+            FACE_SIZE
+        )
+
+        val mask =
+            FloatArray(
+                FACE_SIZE *
+                        FACE_SIZE
+            )
+
+        for (i in pixels.indices) {
+
+            mask[i] =
+                Color.alpha(
+                    pixels[i]
+                ) / 255f
+        }
+
+        bitmap.recycle()
+
+        return mask
+    }
+
+    private fun createFallbackFaceMask():
+            FloatArray {
+
+        val mask =
+            FloatArray(
+                FACE_SIZE *
+                        FACE_SIZE
+            )
+
+        val cx =
+            FACE_SIZE / 2f
+
+        val cy =
+            139f
+
+        val rx =
+            91f
+
+        val ry =
+            108f
+
+        for (y in 0 until FACE_SIZE) {
+
+            for (x in 0 until FACE_SIZE) {
+
+                val dx =
+                    (x - cx) /
+                            rx
+
+                val dy =
+                    (y - cy) /
+                            ry
+
+                val distance =
+                    dx * dx +
+                            dy * dy
+
+                if (distance <= 1f) {
+
+                    mask[
+                        y * FACE_SIZE + x
+                    ] = 1f
+                }
+            }
+        }
+
+        return mask
+    }
+
+    private fun convexHull(
+        input: List<Point2D>
+    ): List<Point2D> {
+
+        if (input.size <= 2) {
+            return input
+        }
+
+        val points =
+            input
+                .distinctBy {
+                    "${it.x}_${it.y}"
+                }
+                .sortedWith(
+                    compareBy<Point2D> {
+                        it.x
+                    }.thenBy {
+                        it.y
+                    }
+                )
+
+        if (points.size <= 2) {
+            return points
+        }
+
+        val lower =
+            ArrayList<Point2D>()
+
+        for (point in points) {
+
+            while (
+                lower.size >= 2 &&
+                cross(
+                    lower[
+                        lower.size - 2
+                    ],
+                    lower[
+                        lower.size - 1
+                    ],
+                    point
+                ) <= 0f
+            ) {
+
+                lower.removeAt(
+                    lower.size - 1
+                )
+            }
+
+            lower.add(
+                point
+            )
+        }
+
+        val upper =
+            ArrayList<Point2D>()
+
+        for (i in points.indices.reversed()) {
+
+            val point =
+                points[i]
+
+            while (
+                upper.size >= 2 &&
+                cross(
+                    upper[
+                        upper.size - 2
+                    ],
+                    upper[
+                        upper.size - 1
+                    ],
+                    point
+                ) <= 0f
+            ) {
+
+                upper.removeAt(
+                    upper.size - 1
+                )
+            }
+
+            upper.add(
+                point
+            )
+        }
+
+        lower.removeAt(
+            lower.size - 1
+        )
+
+        upper.removeAt(
+            upper.size - 1
+        )
+
+        lower.addAll(
+            upper
+        )
+
+        return lower
+    }
+
+    private fun cross(
+        a: Point2D,
+        b: Point2D,
+        c: Point2D
+    ): Float {
+
+        return (
+            b.x - a.x
+            ) * (
+            c.y - a.y
+            ) -
+                (
+                    b.y - a.y
+                    ) * (
+                    c.x - a.x
+                    )
+    }
+
+    /*
+     * ============================================================
+     * ADAPTIVE BLENDING
+     * ============================================================
+     */
+
+    private fun pasteBack(
+        originalTarget: Bitmap,
+        targetPrepared: PreparedFace,
+        swapResult: HyperSwapResult,
+        targetFaceMask: FloatArray
+    ): Bitmap {
+
+        /*
+         * Determine how much the HyperSwap mask needs to expand
+         * relative to the actual target face.
+         */
+        val expansion =
+            calculateAdaptiveExpansion(
+                swapResult.mask,
+                targetFaceMask
+            )
+
+        val expandedMask =
+            expandMask(
+                swapResult.mask,
+                expansion.first,
+                expansion.second
+            )
+
+        /*
+         * Clip the expanded generated-face mask to the actual
+         * target face shape.
          *
-         * This removes the hard visible boundary
-         * around the generated face.
+         * This is the key protection against:
+         *
+         * thick source -> thin target
+         */
+        val clippedMask =
+            FloatArray(
+                FACE_SIZE *
+                        FACE_SIZE
+            )
+
+        for (i in clippedMask.indices) {
+
+            clippedMask[i] =
+                min(
+                    expandedMask[i],
+                    targetFaceMask[i]
+                )
+        }
+
+        /*
+         * Feather the boundary.
          */
         val blurredMask =
             blurMask(
-                mask = mask,
-                width = HYPER_SIZE,
-                height = HYPER_SIZE,
-                radius = 5
+                clippedMask,
+                MASK_BLUR_RADIUS
             )
 
-        val sourcePixels =
-            IntArray(size)
+        /*
+         * Convert to a softly weighted alpha mask.
+         */
+        val finalMask =
+            FloatArray(
+                FACE_SIZE *
+                        FACE_SIZE
+            )
 
-        bitmap.getPixels(
-            sourcePixels,
-            0,
-            HYPER_SIZE,
-            0,
-            0,
-            HYPER_SIZE,
-            HYPER_SIZE
-        )
+        for (i in finalMask.indices) {
 
-        val outputPixels =
-            IntArray(size)
-
-        for (i in 0 until size) {
-
-            val sourceColor =
-                sourcePixels[i]
-
-            /*
-             * Use the blurred mask as alpha.
-             *
-             * Squaring the mask keeps the center
-             * of the face stronger while making the
-             * outer transition softer.
-             */
-            val maskValue =
+            val value =
                 blurredMask[i]
                     .coerceIn(
                         0f,
                         1f
                     )
 
-            val alpha =
+            /*
+             * Smoothstep.
+             */
+            val smooth =
+                value * value *
+                        (
+                            3f -
+                                    2f * value
+                            )
+
+            finalMask[i] =
                 (
-                    maskValue *
-                            maskValue *
-                            255f
+                    smooth *
+                            MAX_ALPHA
+                    ).coerceIn(
+                        0f,
+                        MAX_ALPHA
                     )
-                    .toInt()
-                    .coerceIn(
-                        0,
-                        255
-                    )
-
-            outputPixels[i] =
-                Color.argb(
-                    alpha,
-                    Color.red(sourceColor),
-                    Color.green(sourceColor),
-                    Color.blue(sourceColor)
-                )
-        }
-
-        val output =
-            Bitmap.createBitmap(
-                HYPER_SIZE,
-                HYPER_SIZE,
-                Bitmap.Config.ARGB_8888
-            )
-
-        output.setPixels(
-            outputPixels,
-            0,
-            HYPER_SIZE,
-            0,
-            0,
-            HYPER_SIZE,
-            HYPER_SIZE
-        )
-
-        return output
-    }
-
-    private fun blurMask(
-        mask: FloatArray,
-        width: Int,
-        height: Int,
-        radius: Int
-    ): FloatArray {
-
-        if (radius <= 0) {
-            return mask.copyOf()
-        }
-
-        val horizontal =
-            FloatArray(
-                width * height
-            )
-
-        val output =
-            FloatArray(
-                width * height
-            )
-
-        val window =
-            radius * 2 + 1
-
-        /*
-         * HORIZONTAL BLUR
-         */
-        for (y in 0 until height) {
-
-            var sum = 0f
-
-            for (x in -radius..radius) {
-
-                val clampedX =
-                    x.coerceIn(
-                        0,
-                        width - 1
-                    )
-
-                sum +=
-                    mask[
-                        y * width +
-                                clampedX
-                    ]
-            }
-
-            for (x in 0 until width) {
-
-                horizontal[
-                    y * width + x
-                ] =
-                    sum / window
-
-                val removeX =
-                    (
-                        x - radius
-                        )
-                        .coerceIn(
-                            0,
-                            width - 1
-                        )
-
-                val addX =
-                    (
-                        x + radius + 1
-                        )
-                        .coerceIn(
-                            0,
-                            width - 1
-                        )
-
-                sum -=
-                    mask[
-                        y * width +
-                                removeX
-                    ]
-
-                sum +=
-                    mask[
-                        y * width +
-                                addX
-                    ]
-            }
-        }
-
-        /*
-         * VERTICAL BLUR
-         */
-        for (x in 0 until width) {
-
-            var sum = 0f
-
-            for (y in -radius..radius) {
-
-                val clampedY =
-                    y.coerceIn(
-                        0,
-                        height - 1
-                    )
-
-                sum +=
-                    horizontal[
-                        clampedY * width +
-                                x
-                    ]
-            }
-
-            for (y in 0 until height) {
-
-                output[
-                    y * width + x
-                ] =
-                    sum / window
-
-                val removeY =
-                    (
-                        y - radius
-                        )
-                        .coerceIn(
-                            0,
-                            height - 1
-                        )
-
-                val addY =
-                    (
-                        y + radius + 1
-                        )
-                        .coerceIn(
-                            0,
-                            height - 1
-                        )
-
-                sum -=
-                    horizontal[
-                        removeY * width +
-                                x
-                    ]
-
-                sum +=
-                    horizontal[
-                        addY * width +
-                                x
-                    ]
-            }
-        }
-
-        return output
-    }
-
-    private fun pasteBack(
-        original: Bitmap,
-        swap: HyperSwapResult,
-        transform: Matrix
-    ): Bitmap {
-
-        val output =
-            original.copy(
-                Bitmap.Config.ARGB_8888,
-                true
-            )
-
-        val inverse =
-            Matrix()
-
-        if (
-            !transform.invert(
-                inverse
-            )
-        ) {
-
-            swap.bitmap.recycle()
-
-            throw IllegalStateException(
-                "Could not invert paste transform"
-            )
         }
 
         val maskedSwap =
             createMaskedSwap(
-                swap.bitmap,
-                swap.mask
+                swapResult.bitmap,
+                finalMask
+            )
+
+        /*
+         * Invert the alignment transform.
+         */
+        val inverse =
+            Matrix()
+
+        if (
+            !targetPrepared.transform.invert(
+                inverse
+            )
+        ) {
+
+            maskedSwap.recycle()
+
+            throw IllegalStateException(
+                "Could not invert face transform"
+            )
+        }
+
+        val output =
+            originalTarget.copy(
+                Bitmap.Config.ARGB_8888,
+                true
             )
 
         val canvas =
-            Canvas(
-                output
-            )
+            Canvas(output)
 
         val paint =
             Paint(
@@ -1570,20 +1547,702 @@ class FaceSwapEngine(
         )
 
         maskedSwap.recycle()
-        swap.bitmap.recycle()
+
+        if (
+            targetPrepared.bitmap !== output
+        ) {
+            targetPrepared.bitmap.recycle()
+        }
+
+        swapResult.bitmap.recycle()
 
         return output
     }
 
-    fun close() {
+    private fun calculateAdaptiveExpansion(
+        swapMask: FloatArray,
+        targetMask: FloatArray
+    ): Pair<Int, Int> {
 
-        try {
-            hyperSwapSession?.close()
-        } catch (_: Throwable) {
+        val swapBounds =
+            findMaskBounds(
+                swapMask,
+                0.15f
+            )
+
+        val targetBounds =
+            findMaskBounds(
+                targetMask,
+                0.50f
+            )
+
+        if (
+            swapBounds == null ||
+            targetBounds == null
+        ) {
+
+            return Pair(
+                MIN_EXPAND,
+                MIN_EXPAND
+            )
         }
 
+        val swapWidth =
+            swapBounds.width()
+
+        val swapHeight =
+            swapBounds.height()
+
+        val targetWidth =
+            targetBounds.width()
+
+        val targetHeight =
+            targetBounds.height()
+
+        /*
+         * If the target face is wider than the HyperSwap mask,
+         * expand toward it.
+         *
+         * If the target is narrower, expansion stays minimal.
+         */
+        val extraWidth =
+            max(
+                0f,
+                targetWidth -
+                        swapWidth
+            )
+
+        val extraHeight =
+            max(
+                0f,
+                targetHeight -
+                        swapHeight
+            )
+
+        val expandX =
+            (
+                extraWidth * 0.28f
+                )
+                .toInt()
+                .coerceIn(
+                    MIN_EXPAND,
+                    MAX_EXPAND_X
+                )
+
+        val expandY =
+            (
+                extraHeight * 0.28f
+                )
+                .toInt()
+                .coerceIn(
+                    MIN_EXPAND,
+                    MAX_EXPAND_Y
+                )
+
+        return Pair(
+            expandX,
+            expandY
+        )
+    }
+
+    private fun findMaskBounds(
+        mask: FloatArray,
+        threshold: Float
+    ): MaskBounds? {
+
+        var minX =
+            FACE_SIZE
+
+        var minY =
+            FACE_SIZE
+
+        var maxX =
+            -1
+
+        var maxY =
+            -1
+
+        for (y in 0 until FACE_SIZE) {
+
+            for (x in 0 until FACE_SIZE) {
+
+                val index =
+                    y * FACE_SIZE + x
+
+                if (
+                    index < mask.size &&
+                    mask[index] >
+                        threshold
+                ) {
+
+                    minX =
+                        min(
+                            minX,
+                            x
+                        )
+
+                    minY =
+                        min(
+                            minY,
+                            y
+                        )
+
+                    maxX =
+                        max(
+                            maxX,
+                            x
+                        )
+
+                    maxY =
+                        max(
+                            maxY,
+                            y
+                        )
+                }
+            }
+        }
+
+        if (maxX < minX ||
+            maxY < minY
+        ) {
+            return null
+        }
+
+        return MaskBounds(
+            minX,
+            minY,
+            maxX,
+            maxY
+        )
+    }
+
+    private fun expandMask(
+        mask: FloatArray,
+        radiusX: Int,
+        radiusY: Int
+    ): FloatArray {
+
+        if (
+            radiusX <= 0 &&
+            radiusY <= 0
+        ) {
+            return mask.copyOf()
+        }
+
+        val output =
+            FloatArray(
+                FACE_SIZE *
+                        FACE_SIZE
+            )
+
+        /*
+         * Elliptical max filter.
+         *
+         * This expands the mask while retaining its shape better
+         * than simply drawing a large rectangle.
+         */
+        for (y in 0 until FACE_SIZE) {
+
+            for (x in 0 until FACE_SIZE) {
+
+                var maximum =
+                    0f
+
+                val top =
+                    max(
+                        0,
+                        y - radiusY
+                    )
+
+                val bottom =
+                    min(
+                        FACE_SIZE - 1,
+                        y + radiusY
+                    )
+
+                val left =
+                    max(
+                        0,
+                        x - radiusX
+                    )
+
+                val right =
+                    min(
+                        FACE_SIZE - 1,
+                        x + radiusX
+                    )
+
+                for (ny in top..bottom) {
+
+                    val dy =
+                        ny - y
+
+                    for (nx in left..right) {
+
+                        val dx =
+                            nx - x
+
+                        val normalizedX =
+                            if (
+                                radiusX == 0
+                            ) {
+                                0f
+                            } else {
+                                dx.toFloat() /
+                                        radiusX
+                            }
+
+                        val normalizedY =
+                            if (
+                                radiusY == 0
+                            ) {
+                                0f
+                            } else {
+                                dy.toFloat() /
+                                        radiusY
+                            }
+
+                        if (
+                            normalizedX *
+                                normalizedX +
+                            normalizedY *
+                                normalizedY <=
+                                1f
+                        ) {
+
+                            val value =
+                                mask[
+                                    ny *
+                                            FACE_SIZE +
+                                            nx
+                                ]
+
+                            if (
+                                value >
+                                maximum
+                            ) {
+                                maximum =
+                                    value
+                            }
+                        }
+                    }
+                }
+
+                output[
+                    y * FACE_SIZE + x
+                ] =
+                    maximum
+            }
+        }
+
+        return output
+    }
+
+    private fun blurMask(
+        input: FloatArray,
+        radius: Int
+    ): FloatArray {
+
+        if (radius <= 0) {
+            return input.copyOf()
+        }
+
+        val horizontal =
+            FloatArray(
+                input.size
+            )
+
+        val output =
+            FloatArray(
+                input.size
+            )
+
+        /*
+         * Horizontal box blur.
+         */
+        for (y in 0 until FACE_SIZE) {
+
+            for (x in 0 until FACE_SIZE) {
+
+                var sum =
+                    0f
+
+                var count =
+                    0
+
+                val start =
+                    max(
+                        0,
+                        x - radius
+                    )
+
+                val end =
+                    min(
+                        FACE_SIZE - 1,
+                        x + radius
+                    )
+
+                for (xx in start..end) {
+
+                    sum +=
+                        input[
+                            y *
+                                    FACE_SIZE +
+                                    xx
+                        ]
+
+                    count++
+                }
+
+                horizontal[
+                    y *
+                            FACE_SIZE +
+                            x
+                ] =
+                    sum /
+                            count
+            }
+        }
+
+        /*
+         * Vertical box blur.
+         */
+        for (y in 0 until FACE_SIZE) {
+
+            for (x in 0 until FACE_SIZE) {
+
+                var sum =
+                    0f
+
+                var count =
+                    0
+
+                val start =
+                    max(
+                        0,
+                        y - radius
+                    )
+
+                val end =
+                    min(
+                        FACE_SIZE - 1,
+                        y + radius
+                    )
+
+                for (yy in start..end) {
+
+                    sum +=
+                        horizontal[
+                            yy *
+                                    FACE_SIZE +
+                                    x
+                        ]
+
+                    count++
+                }
+
+                output[
+                    y *
+                            FACE_SIZE +
+                            x
+                ] =
+                    sum /
+                            count
+            }
+        }
+
+        return output
+    }
+
+    private fun createMaskedSwap(
+        bitmap: Bitmap,
+        mask: FloatArray
+    ): Bitmap {
+
+        val output =
+            Bitmap.createBitmap(
+                FACE_SIZE,
+                FACE_SIZE,
+                Bitmap.Config.ARGB_8888
+            )
+
+        val pixels =
+            IntArray(
+                FACE_SIZE *
+                        FACE_SIZE
+            )
+
+        bitmap.getPixels(
+            pixels,
+            0,
+            FACE_SIZE,
+            0,
+            0,
+            FACE_SIZE,
+            FACE_SIZE
+        )
+
+        for (i in pixels.indices) {
+
+            val alpha =
+                (
+                    mask.getOrElse(
+                        i
+                    ) {
+                        0f
+                    } * 255f
+                    )
+                    .toInt()
+                    .coerceIn(
+                        0,
+                        255
+                    )
+
+            pixels[i] =
+                Color.argb(
+                    alpha,
+                    Color.red(
+                        pixels[i]
+                    ),
+                    Color.green(
+                        pixels[i]
+                    ),
+                    Color.blue(
+                        pixels[i]
+                    )
+                )
+        }
+
+        output.setPixels(
+            pixels,
+            0,
+            FACE_SIZE,
+            0,
+            0,
+            FACE_SIZE,
+            FACE_SIZE
+        )
+
+        return output
+    }
+
+    /*
+     * ============================================================
+     * OUTPUT CONVERSION
+     * ============================================================
+     */
+
+    private fun imageToBitmap(
+        values: FloatArray
+    ): Bitmap {
+
+        if (
+            values.size <
+            FACE_SIZE *
+            FACE_SIZE *
+            3
+        ) {
+            throw IllegalStateException(
+                "Invalid HyperSwap image output"
+            )
+        }
+
+        val bitmap =
+            Bitmap.createBitmap(
+                FACE_SIZE,
+                FACE_SIZE,
+                Bitmap.Config.ARGB_8888
+            )
+
+        val pixels =
+            IntArray(
+                FACE_SIZE *
+                        FACE_SIZE
+            )
+
+        /*
+         * HyperSwap output is:
+         *
+         * [1,3,256,256]
+         *
+         * RGB CHW, [-1,1].
+         */
+        val plane =
+            FACE_SIZE *
+                    FACE_SIZE
+
+        for (y in 0 until FACE_SIZE) {
+
+            for (x in 0 until FACE_SIZE) {
+
+                val pixelIndex =
+                    y *
+                            FACE_SIZE +
+                            x
+
+                val r =
+                    values[
+                        pixelIndex
+                    ]
+
+                val g =
+                    values[
+                        plane +
+                                pixelIndex
+                    ]
+
+                val b =
+                    values[
+                        plane * 2 +
+                                pixelIndex
+                    ]
+
+                val red =
+                    (
+                        (
+                            r + 1f
+                            ) *
+                                127.5f
+                        )
+                        .toInt()
+                        .coerceIn(
+                            0,
+                            255
+                        )
+
+                val green =
+                    (
+                        (
+                            g + 1f
+                            ) *
+                                127.5f
+                        )
+                        .toInt()
+                        .coerceIn(
+                            0,
+                            255
+                        )
+
+                val blue =
+                    (
+                        (
+                            b + 1f
+                            ) *
+                                127.5f
+                        )
+                        .toInt()
+                        .coerceIn(
+                            0,
+                            255
+                        )
+
+                pixels[pixelIndex] =
+                    Color.rgb(
+                        red,
+                        green,
+                        blue
+                    )
+            }
+        }
+
+        bitmap.setPixels(
+            pixels,
+            0,
+            FACE_SIZE,
+            0,
+            0,
+            FACE_SIZE,
+            FACE_SIZE
+        )
+
+        return bitmap
+    }
+
+    private fun extractFloatArray(
+        value: Any?
+    ): FloatArray {
+
+        when (value) {
+
+            is FloatArray ->
+                return value
+
+            is Array<*> -> {
+
+                val result =
+                    ArrayList<Float>()
+
+                fun flatten(
+                    item: Any?
+                ) {
+
+                    when (item) {
+
+                        is Float ->
+                            result.add(
+                                item
+                            )
+
+                        is Double ->
+                            result.add(
+                                item.toFloat()
+                            )
+
+                        is Number ->
+                            result.add(
+                                item.toFloat()
+                            )
+
+                        is FloatArray -> {
+
+                            for (v in item) {
+                                result.add(v)
+                            }
+                        }
+
+                        is Array<*> -> {
+
+                            for (v in item) {
+                                flatten(v)
+                            }
+                        }
+
+                        else -> {
+                            // Ignore unsupported values.
+                        }
+                    }
+                }
+
+                flatten(value)
+
+                return result.toFloatArray()
+            }
+
+            is Number ->
+                return floatArrayOf(
+                    value.toFloat()
+                )
+
+            else ->
+                throw IllegalStateException(
+                    "Unsupported ONNX output type: ${
+                        value?.javaClass?.name
+                    }"
+                )
+        }
+    }
+
+    fun close() {
+
+        if (closed) {
+            return
+        }
+
+        closed =
+            true
+
         try {
-            arcFaceSession?.close()
+            detectorSession?.close()
         } catch (_: Throwable) {
         }
 
@@ -1593,23 +2252,61 @@ class FaceSwapEngine(
         }
 
         try {
-            detectorSession?.close()
+            arcFaceSession?.close()
         } catch (_: Throwable) {
         }
 
-        hyperSwapSession = null
-        arcFaceSession = null
-        landmarkerSession = null
-        detectorSession = null
+        try {
+            hyperSwapSession?.close()
+        } catch (_: Throwable) {
+        }
+
+        detectorSession =
+            null
+
+        landmarkerSession =
+            null
+
+        arcFaceSession =
+            null
+
+        hyperSwapSession =
+            null
     }
+
+    /*
+     * ============================================================
+     * DATA CLASSES
+     * ============================================================
+     */
 
     private data class PreparedFace(
         val bitmap: Bitmap,
-        val transform: Matrix
+        val transform: Matrix,
+        val alignedLandmarks: Array<FloatArray>
     )
 
     private data class HyperSwapResult(
         val bitmap: Bitmap,
         val mask: FloatArray
     )
+
+    private data class Point2D(
+        val x: Float,
+        val y: Float
+    )
+
+    private data class MaskBounds(
+        val minX: Int,
+        val minY: Int,
+        val maxX: Int,
+        val maxY: Int
+    ) {
+
+        fun width(): Int =
+            maxX - minX + 1
+
+        fun height(): Int =
+            maxY - minY + 1
+    }
 }
