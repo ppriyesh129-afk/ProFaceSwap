@@ -11,6 +11,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var targetImage: ImageView
     private lateinit var statusText: TextView
+    private lateinit var faceSwapEngine: FaceSwapEngine
 
     private val targetPicker =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -35,14 +36,17 @@ class MainActivity : AppCompatActivity() {
         targetImage = findViewById(R.id.targetImage)
         statusText = findViewById(R.id.statusText)
 
-        val selectTargetButton =
-            findViewById<Button>(R.id.selectTargetButton)
+        faceSwapEngine = FaceSwapEngine(this)
 
-        val selectSourceButton =
-            findViewById<Button>(R.id.selectSourceButton)
+        statusText.text =
+            if (faceSwapEngine.loadModels())
+                "AI models loaded"
+            else
+                "Failed to load AI models"
 
-        val swapButton =
-            findViewById<Button>(R.id.swapButton)
+        val selectTargetButton = findViewById<Button>(R.id.selectTargetButton)
+        val selectSourceButton = findViewById<Button>(R.id.selectSourceButton)
+        val swapButton = findViewById<Button>(R.id.swapButton)
 
         selectTargetButton.setOnClickListener {
             targetPicker.launch("image/*")
@@ -53,7 +57,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         swapButton.setOnClickListener {
-            statusText.text = "AI face-swap engine will be added next"
+            statusText.text = "Preparing BlazeFace → 478 landmarks → BlendSwap"
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        faceSwapEngine.close()
     }
 }
