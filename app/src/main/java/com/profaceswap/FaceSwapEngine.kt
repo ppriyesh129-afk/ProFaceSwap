@@ -265,7 +265,8 @@ class FaceSwapEngine(
             return pasteBack(
                 original = target,
                 swap = swap,
-                transform = targetAligned.transform
+                transform = targetAligned.transform,
+                targetLandmarks = targetAligned.landmarks
             )
 
         } finally {
