@@ -130,7 +130,29 @@ jobs:
                       tensor_type.elem_type
                   )
           PY
+      - name: Verify AI models
+        run: |
+          echo "Downloaded AI models:"
+          ls -lh app/src/main/assets/models/
 
+      # ...keep all your existing steps above...
+
+      - name: Verify FaceSwapEngine source
+        run: |
+          echo "===== FaceSwapEngine line count ====="
+          wc -l app/src/main/java/com/profaceswap/FaceSwapEngine.kt
+          echo "===== Searching for size() ====="
+          grep -n "size()" app/src/main/java/com/profaceswap/FaceSwapEngine.kt || true
+          echo "===== Lines 1048-1065 ====="
+          sed -n '1048,1065p' app/src/main/java/com/profaceswap/FaceSwapEngine.kt
+          echo "===== Lines 1085-1102 ====="
+          sed -n '1085,1102p' app/src/main/java/com/profaceswap/FaceSwapEngine.kt
+          echo "===== Lines 1241-1270 ====="
+          sed -n '1241,1270p' app/src/main/java/com/profaceswap/FaceSwapEngine.kt
+
+      - name: Build APK
+        run: |
+          gradle clean assembleDebug --no-daemon --refresh-dependencies
       - name: Build APK
         run: |
           gradle clean assembleDebug --no-daemon --refresh-dependencies
