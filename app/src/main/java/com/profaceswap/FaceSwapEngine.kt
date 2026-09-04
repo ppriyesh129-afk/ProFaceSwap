@@ -1055,7 +1055,7 @@ class FaceSwapEngine(
             )
 
             diagnostics.append(
-                result.size
+                result.size()
             )
 
             diagnostics.append(
@@ -1092,7 +1092,7 @@ class FaceSwapEngine(
             )
 
             for (
-                index in 0 until result.size
+                index in 0 until result.size()
             ) {
 
                 val value =
@@ -1248,7 +1248,7 @@ class FaceSwapEngine(
 
             val imageRaw =
                 if (
-                    result.size >
+                    result.size() >
                     0
                 ) {
 
@@ -1261,7 +1261,7 @@ class FaceSwapEngine(
 
             val maskRaw =
                 if (
-                    result.size >
+                    result.size() >
                     1
                 ) {
 
