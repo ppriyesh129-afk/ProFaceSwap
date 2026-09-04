@@ -1274,16 +1274,27 @@ class FaceSwapEngine(
         assetPath: String
     ): OrtSession {
 
-        val bytes =
-            context.assets
-                .open(assetPath)
-                .use { input ->
-                    input.readBytes()
+        val file = java.io.File(
+            context.cacheDir,
+            assetPath.substringAfterLast("/")
+        )
+
+        if (!file.exists()) {
+            context.assets.open(assetPath).use { input ->
+                file.outputStream().use { output ->
+                    input.copyTo(output)
                 }
+            }
+        }
+
+        val options = OrtSession.SessionOptions().apply {
+            setMemoryPatternOptimization(false)
+            setCPUArenaAllocator(false)
+        }
 
         return environment.createSession(
-            bytes,
-            OrtSession.SessionOptions()
+            file.absolutePath,
+            options
         )
     }
 
