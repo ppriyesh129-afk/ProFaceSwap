@@ -1413,7 +1413,9 @@ class FaceSwapEngine(
         val maskedSwap =
             createMaskedSwap(
                 swap.bitmap,
-                swap.mask
+                swap.mask,
+                targetLandmarks,
+                transform
             )
 
         val canvas =
@@ -1441,7 +1443,9 @@ class FaceSwapEngine(
 
     private fun createMaskedSwap(
         bitmap: Bitmap,
-        mask: FloatArray
+        mask: FloatArray,
+        targetLandmarks: Array<FloatArray>,
+        transform: Matrix
     ): Bitmap {
 
         val expected =
