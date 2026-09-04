@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="ProFaceSwap"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:padding="12dp" />
+
+    <ImageView
+        android:id="@+id/targetImage"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="8dp"
+        android:background="#DDDDDD"
+        android:contentDescription="Target image"
+        android:scaleType="fitCenter" />
+
+    <Button
+        android:id="@+id/selectTargetButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Select Target Image" />
+
+    <Button
+        android:id="@+id/selectSourceButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Select Source Face" />
+
+    <Button
+        android:id="@+id/swapButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="SWAP FACES" />
+
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Ready"
+        android:gravity="center"
+        android:padding="8dp" />
+
+</LinearLayout>
