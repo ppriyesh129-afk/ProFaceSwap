@@ -56,7 +56,7 @@ jobs:
       - name: Download HyperSwap 1a 256
         run: |
           wget -O app/src/main/assets/models/hyperswap_1a_256.onnx \
-            https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/hyperswap_1a_256.onnx
+            https://huggingface.co/facefusion/models-3.3.0/resolve/main/hyperswap_1a_256.onnx
 
       - name: Verify AI models
         run: |
