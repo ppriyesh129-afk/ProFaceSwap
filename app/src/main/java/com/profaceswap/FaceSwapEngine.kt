@@ -10,6 +10,8 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.PointF
 import java.nio.FloatBuffer
 import kotlin.math.max
 import kotlin.math.sqrt
@@ -1839,6 +1841,189 @@ class FaceSwapEngine(
         arcFaceSession = null
         landmarkerSession = null
         detectorSession = null
+    }
+
+    private fun convexHullPoints(
+        points: FloatArray
+    ): List<PointF> {
+
+        val input =
+            ArrayList<PointF>()
+
+        var i = 0
+
+        while (i + 1 < points.size) {
+
+            input.add(
+                PointF(
+                    points[i],
+                    points[i + 1]
+                )
+            )
+
+            i += 2
+        }
+
+        if (input.size <= 2) {
+            return input
+        }
+
+        val sorted =
+            input.sortedWith(
+                compareBy<PointF> {
+                    it.x
+                }.thenBy {
+                    it.y
+                }
+            )
+
+        fun cross(
+            a: PointF,
+            b: PointF,
+            c: PointF
+        ): Float {
+
+            return (
+                (b.x - a.x) *
+                        (c.y - a.y) -
+                        (b.y - a.y) *
+                        (c.x - a.x)
+                )
+        }
+
+        val lower =
+            ArrayList<PointF>()
+
+        for (point in sorted) {
+
+            while (
+                lower.size >= 2 &&
+                cross(
+                    lower[lower.size - 2],
+                    lower[lower.size - 1],
+                    point
+                ) <= 0f
+            ) {
+
+                lower.removeAt(
+                    lower.size - 1
+                )
+            }
+
+            lower.add(point)
+        }
+
+        val upper =
+            ArrayList<PointF>()
+
+        for (index in sorted.indices.reversed()) {
+
+            val point =
+                sorted[index]
+
+            while (
+                upper.size >= 2 &&
+                cross(
+                    upper[upper.size - 2],
+                    upper[upper.size - 1],
+                    point
+                ) <= 0f
+            ) {
+
+                upper.removeAt(
+                    upper.size - 1
+                )
+            }
+
+            upper.add(point)
+        }
+
+        lower.removeAt(
+            lower.size - 1
+        )
+
+        upper.removeAt(
+            upper.size - 1
+        )
+
+        lower.addAll(
+            upper
+        )
+
+        return lower
+    }
+
+    private fun createTargetFaceMask(
+        targetLandmarks: Array<FloatArray>,
+        transform: Matrix,
+        width: Int,
+        height: Int
+    ): Bitmap {
+
+        val mask =
+            Bitmap.createBitmap(
+                width,
+                height,
+                Bitmap.Config.ALPHA_8
+            )
+
+        val canvas =
+            Canvas(mask)
+
+        val paint =
+            Paint(
+                Paint.ANTI_ALIAS_FLAG
+            )
+
+        paint.color = Color.WHITE
+        paint.style = Paint.Style.FILL
+
+        val points =
+            FloatArray(
+                targetLandmarks.size * 2
+            )
+
+        for (i in targetLandmarks.indices) {
+
+            points[i * 2] =
+                targetLandmarks[i][0]
+
+            points[i * 2 + 1] =
+                targetLandmarks[i][1]
+        }
+
+        transform.mapPoints(points)
+
+        val hull =
+            convexHullPoints(points)
+
+        if (hull.size >= 3) {
+
+            val path =
+                Path()
+
+            path.moveTo(
+                hull[0].x,
+                hull[0].y
+            )
+
+            for (i in 1 until hull.size) {
+
+                path.lineTo(
+                    hull[i].x,
+                    hull[i].y
+                )
+            }
+
+            path.close()
+
+            canvas.drawPath(
+                path,
+                paint
+            )
+        }
+
+        return mask
     }
 
     private data class PreparedFace(
