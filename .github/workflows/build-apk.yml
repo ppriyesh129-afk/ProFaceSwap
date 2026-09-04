@@ -48,10 +48,15 @@ jobs:
           wget -O app/src/main/assets/models/face_detection_short_range.onnx \
             https://github.com/yakhyo/mediapipe-face-mesh-onnx/releases/download/weights/face_detection_short_range.onnx
 
-      - name: Download BlendSwap 256
+      - name: Download ArcFace embedding model
         run: |
-          wget -O app/src/main/assets/models/blendswap_256.onnx \
-            https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/blendswap_256.onnx
+          wget -O app/src/main/assets/models/arcface_w600k_r50.onnx \
+            https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/arcface_w600k_r50.onnx
+
+      - name: Download HyperSwap 1a 256
+        run: |
+          wget -O app/src/main/assets/models/hyperswap_1a_256.onnx \
+            https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/hyperswap_1a_256.onnx
 
       - name: Verify AI models
         run: |
