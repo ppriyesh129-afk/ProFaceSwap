@@ -34,9 +34,14 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Prepare AI models directory
+      - name: Download BlendSwap 256
         run: |
           mkdir -p app/src/main/assets/models
+
+          wget -O app/src/main/assets/models/blendswap_256.onnx \
+            https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/blendswap_256.onnx
+
+          ls -lh app/src/main/assets/models/
 
       - name: Build APK
         run: |
