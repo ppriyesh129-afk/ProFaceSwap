@@ -535,7 +535,8 @@ class FaceSwapEngine(
 
         return PreparedFace(
             bitmap = aligned,
-            transform = matrix
+            transform = matrix,
+            landmarks = landmarks
         )
     }
 
