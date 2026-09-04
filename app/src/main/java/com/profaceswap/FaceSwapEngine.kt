@@ -1480,6 +1480,27 @@ class FaceSwapEngine(
             HYPER_SIZE
         )
 
+        val targetMaskBitmap =
+            createTargetFaceMask(
+                targetLandmarks = targetLandmarks,
+                transform = transform,
+                width = HYPER_SIZE,
+                height = HYPER_SIZE
+            )
+
+        val targetMaskPixels =
+            ByteArray(
+                expected
+            )
+
+        targetMaskBitmap.copyPixelsToBuffer(
+            java.nio.ByteBuffer.wrap(
+                targetMaskPixels
+            )
+        )
+
+        targetMaskBitmap.recycle()
+
         val outputPixels =
             IntArray(
                 expected
@@ -1492,13 +1513,40 @@ class FaceSwapEngine(
             val sourceColor =
                 sourcePixels[i]
 
+            val hyperAlpha =
+                mask[i]
+                    .coerceIn(
+                        0f,
+                        1f
+                    )
+
+            val landmarkAlpha =
+                (
+                    targetMaskPixels[i]
+                        .toInt() and 0xFF
+                    ) / 255f
+
+            /*
+             * Keep the HyperSwap mask as the main mask,
+             * but allow the target face shape to extend it.
+             *
+             * This helps when the source face is thinner
+             * than the target face.
+             */
+
+            val combinedAlpha =
+                max(
+                    hyperAlpha,
+                    landmarkAlpha * 0.65f
+                )
+                    .coerceIn(
+                        0f,
+                        1f
+                    )
+
             val alpha =
                 (
-                    mask[i]
-                        .coerceIn(
-                            0f,
-                            1f
-                        ) *
+                    combinedAlpha *
                             255f
                     )
                     .toInt()
