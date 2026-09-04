@@ -34,13 +34,22 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Download BlendSwap 256
+      - name: Prepare AI models directory
         run: |
           mkdir -p app/src/main/assets/models
 
+      - name: Download 478-point Face Landmarker
+        run: |
+          wget -O app/src/main/assets/models/face_landmarker_Nx3x256x256.onnx \
+            https://github.com/yakhyo/mediapipe-face-mesh-onnx/releases/download/weights/face_landmarker_Nx3x256x256.onnx
+
+      - name: Download BlendSwap 256
+        run: |
           wget -O app/src/main/assets/models/blendswap_256.onnx \
             https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/blendswap_256.onnx
 
+      - name: Verify models
+        run: |
           ls -lh app/src/main/assets/models/
 
       - name: Build APK
