@@ -1534,11 +1534,15 @@ class FaceSwapEngine(
              * than the target face.
              */
 
+            val landmarkContribution =
+                landmarkAlpha * 0.65f
+
             val combinedAlpha =
-                max(
-                    hyperAlpha,
-                    landmarkAlpha * 0.65f
-                )
+                (
+                    hyperAlpha +
+                            landmarkContribution *
+                            (1f - hyperAlpha)
+                    )
                     .coerceIn(
                         0f,
                         1f
