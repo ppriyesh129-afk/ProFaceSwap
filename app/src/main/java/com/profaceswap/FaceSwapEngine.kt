@@ -9,15 +9,20 @@ class FaceSwapEngine(private val context: Context) {
 
     private val env = OrtEnvironment.getEnvironment()
 
-    private var detector: OrtSession? = null
-    private var landmarker: OrtSession? = null
-    private var blendSwap: OrtSession? = null
+    private var detectorSession: OrtSession? = null
+    private var landmarkerSession: OrtSession? = null
+    private var blendSwapSession: OrtSession? = null
+
+    private var detector: BlazeFaceDetector? = null
 
     fun loadModels(): Boolean {
         return try {
-            detector = createSession("models/face_detection_short_range.onnx")
-            landmarker = createSession("models/face_landmarker_Nx3x256x256.onnx")
-            blendSwap = createSession("models/blendswap_256.onnx")
+            detectorSession = createSession("models/face_detection_short_range.onnx")
+            landmarkerSession = createSession("models/face_landmarker_Nx3x256x256.onnx")
+            blendSwapSession = createSession("models/blendswap_256.onnx")
+
+            detector = BlazeFaceDetector(detectorSession!!)
+
             true
         } catch (e: Exception) {
             e.printStackTrace()
@@ -30,17 +35,14 @@ class FaceSwapEngine(private val context: Context) {
         return env.createSession(bytes)
     }
 
-    fun processSwap(
-        target: Bitmap,
-        source: Bitmap
-    ): Bitmap {
-        // Real inference will be added next.
+    fun processSwap(target: Bitmap, source: Bitmap): Bitmap {
+        detector?.detect(target)
         return target
     }
 
     fun close() {
-        detector?.close()
-        landmarker?.close()
-        blendSwap?.close()
+        detectorSession?.close()
+        landmarkerSession?.close()
+        blendSwapSession?.close()
     }
 }
