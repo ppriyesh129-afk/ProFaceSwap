@@ -1384,7 +1384,8 @@ class FaceSwapEngine(
     private fun pasteBack(
         original: Bitmap,
         swap: HyperSwapResult,
-        transform: Matrix
+        transform: Matrix,
+        targetLandmarks: Array<FloatArray>
     ): Bitmap {
 
         val output =
