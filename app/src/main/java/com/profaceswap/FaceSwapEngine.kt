@@ -3,7 +3,6 @@ package com.profaceswap
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
-import ai.onnxruntime.TensorInfo
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -34,7 +33,6 @@ class FaceSwapEngine(
     private var hyperSwapSession: OrtSession? = null
 
     fun loadModels(): Boolean {
-
         return try {
 
             android.util.Log.d(
@@ -87,7 +85,6 @@ class FaceSwapEngine(
     }
 
     fun loadHyperSwap(): Boolean {
-
         return try {
 
             if (hyperSwapSession != null) {
@@ -147,7 +144,6 @@ class FaceSwapEngine(
                 )
 
         if (!loadHyperSwap()) {
-
             throw IllegalStateException(
                 "HyperSwap could not be loaded"
             )
@@ -175,7 +171,6 @@ class FaceSwapEngine(
             )
 
         if (sourceFaces.isEmpty()) {
-
             throw IllegalStateException(
                 "No face found in source image"
             )
@@ -192,7 +187,6 @@ class FaceSwapEngine(
             )
 
         if (targetFaces.isEmpty()) {
-
             throw IllegalStateException(
                 "No face found in target image"
             )
@@ -301,7 +295,6 @@ class FaceSwapEngine(
             )
 
         if (faceSize <= 1f) {
-
             throw IllegalStateException(
                 "Invalid face size"
             )
@@ -524,7 +517,11 @@ class FaceSwapEngine(
         val inverse =
             Matrix()
 
-        if (!matrix.invert(inverse)) {
+        if (
+            !matrix.invert(
+                inverse
+            )
+        ) {
 
             aligned.recycle()
 
@@ -820,13 +817,16 @@ class FaceSwapEngine(
                     when (channel) {
 
                         0 ->
-                            (pixel shr 16) and 0xFF
+                            (pixel shr 16) and
+                                    0xFF
 
                         1 ->
-                            (pixel shr 8) and 0xFF
+                            (pixel shr 8) and
+                                    0xFF
 
                         else ->
-                            pixel and 0xFF
+                            pixel and
+                                    0xFF
                     }
 
                 buffer.put(
@@ -924,13 +924,16 @@ class FaceSwapEngine(
                     when (channel) {
 
                         0 ->
-                            (pixel shr 16) and 0xFF
+                            (pixel shr 16) and
+                                    0xFF
 
                         1 ->
-                            (pixel shr 8) and 0xFF
+                            (pixel shr 8) and
+                                    0xFF
 
                         else ->
-                            pixel and 0xFF
+                            pixel and
+                                    0xFF
                     }
 
                 buffer.put(
@@ -1006,14 +1009,17 @@ class FaceSwapEngine(
 
         } else {
 
-            if (inputNames.size < 2) {
+            if (
+                inputNames.size <
+                2
+            ) {
 
                 sourceTensor.close()
                 targetTensor.close()
 
                 throw IllegalStateException(
-                    "HyperSwap expects fewer than " +
-                            "2 inputs: $inputNames"
+                    "HyperSwap expects two inputs: " +
+                            "$inputNames"
                 )
             }
 
@@ -1044,264 +1050,58 @@ class FaceSwapEngine(
 
         try {
 
-            val outputInfo =
-                session.outputInfo
-
-            val diagnostics =
-                StringBuilder()
-
-            diagnostics.append(
-                "HyperSwap output count: "
-            )
-
-            diagnostics.append(
-                result.size()
-            )
-
-            diagnostics.append(
-                "\n\n"
-            )
-
-            diagnostics.append(
-                "MODEL OUTPUT INFO:\n"
-            )
-
-            for (
-                entry in outputInfo.entries
-            ) {
-
-                diagnostics.append(
-                    entry.key
-                )
-
-                diagnostics.append(
-                    " -> "
-                )
-
-                diagnostics.append(
-                    entry.value.info
-                )
-
-                diagnostics.append(
-                    "\n"
-                )
-            }
-
-            diagnostics.append(
-                "\nACTUAL OUTPUTS:\n"
-            )
-
-            for (
-                index in 0 until result.size()
-            ) {
-
-                val value =
-                    result[index].value
-
-                diagnostics.append(
-                    "Output "
-                )
-
-                diagnostics.append(
-                    index
-                )
-
-                diagnostics.append(
-                    ": "
-                )
-
-                diagnostics.append(
-                    value?.javaClass?.name
-                        ?: "null"
-                )
-
-                diagnostics.append(
-                    "\n"
-                )
-
-                if (
-                    value is FloatArray
-                ) {
-
-                    diagnostics.append(
-                        "  FloatArray size="
-                    )
-
-                    diagnostics.append(
-                        value.size
-                    )
-
-                    diagnostics.append(
-                        "\n"
-                    )
-
-                } else if (
-                    value is DoubleArray
-                ) {
-
-                    diagnostics.append(
-                        "  DoubleArray size="
-                    )
-
-                    diagnostics.append(
-                        value.size
-                    )
-
-                    diagnostics.append(
-                        "\n"
-                    )
-
-                } else if (
-                    value is Array<*>
-                ) {
-
-                    diagnostics.append(
-                        "  Array size="
-                    )
-
-                    diagnostics.append(
-                        value.size
-                    )
-
-                    diagnostics.append(
-                        "\n"
-                    )
-
-                    val first =
-                        value.firstOrNull()
-
-                    if (
-                        first != null
-                    ) {
-
-                        diagnostics.append(
-                            "  First element type="
-                        )
-
-                        diagnostics.append(
-                            first.javaClass.name
-                        )
-
-                        diagnostics.append(
-                            "\n"
-                        )
-
-                        when (first) {
-
-                            is FloatArray -> {
-
-                                diagnostics.append(
-                                    "  First FloatArray size="
-                                )
-
-                                diagnostics.append(
-                                    first.size
-                                )
-
-                                diagnostics.append(
-                                    "\n"
-                                )
-                            }
-
-                            is DoubleArray -> {
-
-                                diagnostics.append(
-                                    "  First DoubleArray size="
-                                )
-
-                                diagnostics.append(
-                                    first.size
-                                )
-
-                                diagnostics.append(
-                                    "\n"
-                                )
-                            }
-
-                            is Array<*> -> {
-
-                                diagnostics.append(
-                                    "  First nested Array size="
-                                )
-
-                                diagnostics.append(
-                                    first.size
-                                )
-
-                                diagnostics.append(
-                                    "\n"
-                                )
-                            }
-                        }
-                    }
-                }
-
-                diagnostics.append(
-                    "\n"
-                )
-            }
-
-            android.util.Log.d(
-                TAG,
-                diagnostics.toString()
-            )
-
-            val imageRaw =
-                if (
-                    result.size() >
-                    0
-                ) {
-
-                    result[0].value
-
-                } else {
-
-                    null
-                }
-
-            val maskRaw =
-                if (
-                    result.size() >
-                    1
-                ) {
-
-                    result[1].value
-
-                } else {
-
-                    null
-                }
-
             if (
-                imageRaw == null
+                result.size() <
+                2
             ) {
 
                 throw IllegalStateException(
-                    diagnostics.toString()
+                    "HyperSwap returned only " +
+                            "${result.size()} outputs"
                 )
             }
 
+            /*
+             * HyperSwap 1a 256 actual outputs:
+             *
+             * output = [1, 3, 256, 256]
+             * mask   = [1, 1, 256, 256]
+             *
+             * ONNX Runtime returns these as nested
+             * Java primitive arrays. We recursively
+             * flatten them below.
+             */
+
             val image =
-                try {
+                extractFloatArray(
+                    result[0].value
+                )
 
-                    extractFloatArray(
-                        imageRaw
-                    )
-
-                } catch (e: Throwable) {
-
-                    throw IllegalStateException(
-                        diagnostics.toString() +
-                                "\nIMAGE DECODE ERROR: " +
-                                "${e.message}",
-                        e
-                    )
-                }
+            val mask =
+                extractFloatArray(
+                    result[1].value
+                )
 
             val expectedImageSize =
                 3 *
                         HYPER_SIZE *
                         HYPER_SIZE
+
+            val expectedMaskSize =
+                HYPER_SIZE *
+                        HYPER_SIZE
+
+            android.util.Log.d(
+                TAG,
+                "HyperSwap image values: " +
+                        image.size
+            )
+
+            android.util.Log.d(
+                TAG,
+                "HyperSwap mask values: " +
+                        mask.size
+            )
 
             if (
                 image.size !=
@@ -1309,45 +1109,13 @@ class FaceSwapEngine(
             ) {
 
                 throw IllegalStateException(
-                    diagnostics.toString() +
-                            "\nEXPECTED IMAGE VALUES: " +
-                            expectedImageSize +
-                            "\nACTUAL IMAGE VALUES: " +
-                            image.size
+                    "Invalid HyperSwap image output: " +
+                            "expected " +
+                            "$expectedImageSize " +
+                            "values, got " +
+                            "${image.size}"
                 )
             }
-
-            if (
-                maskRaw == null
-            ) {
-
-                throw IllegalStateException(
-                    diagnostics.toString() +
-                            "\nHyperSwap did not return " +
-                            "a second mask output."
-                )
-            }
-
-            val mask =
-                try {
-
-                    extractFloatArray(
-                        maskRaw
-                    )
-
-                } catch (e: Throwable) {
-
-                    throw IllegalStateException(
-                        diagnostics.toString() +
-                                "\nMASK DECODE ERROR: " +
-                                "${e.message}",
-                        e
-                    )
-                }
-
-            val expectedMaskSize =
-                HYPER_SIZE *
-                        HYPER_SIZE
 
             if (
                 mask.size <
@@ -1355,11 +1123,11 @@ class FaceSwapEngine(
             ) {
 
                 throw IllegalStateException(
-                    diagnostics.toString() +
-                            "\nEXPECTED MASK VALUES: " +
-                            expectedMaskSize +
-                            "\nACTUAL MASK VALUES: " +
-                            mask.size
+                    "Invalid HyperSwap mask output: " +
+                            "expected at least " +
+                            "$expectedMaskSize " +
+                            "values, got " +
+                            "${mask.size}"
                 )
             }
 
@@ -1368,7 +1136,8 @@ class FaceSwapEngine(
                     imageToBitmap(
                         image
                     ),
-                mask = mask
+                mask =
+                    mask
             )
 
         } finally {
@@ -1551,8 +1320,9 @@ class FaceSwapEngine(
 
             throw IllegalStateException(
                 "Invalid HyperSwap image output: " +
-                        "expected $expected values, " +
-                        "got ${values.size}"
+                        "expected " +
+                        "$expected, got " +
+                        "${values.size}"
             )
         }
 
@@ -1579,7 +1349,9 @@ class FaceSwapEngine(
 
             val g =
                 (
-                    values[plane + i] *
+                    values[
+                        plane + i
+                    ] *
                             127.5f +
                             127.5f
                     )
@@ -1591,7 +1363,9 @@ class FaceSwapEngine(
 
             val b =
                 (
-                    values[plane * 2 + i] *
+                    values[
+                        plane * 2 + i
+                    ] *
                             127.5f +
                             127.5f
                     )
@@ -1629,75 +1403,176 @@ class FaceSwapEngine(
         return bitmap
     }
 
+    /*
+     * IMPORTANT:
+     *
+     * ONNX Runtime returns a tensor such as
+     *
+     * float[1][3][256][256]
+     *
+     * as nested Java arrays:
+     *
+     * Array -> Array -> Array -> FloatArray
+     *
+     * The old decoder only flattened one level,
+     * which caused "0 values".
+     *
+     * This decoder recursively walks every array
+     * level and returns one flat FloatArray.
+     */
+
     private fun extractFloatArray(
-        raw: Any
+        raw: Any?
     ): FloatArray {
 
-        return when (raw) {
+        if (raw == null) {
 
-            is FloatArray ->
-                raw
+            throw IllegalStateException(
+                "Tensor output was null"
+            )
+        }
 
-            is DoubleArray ->
-                FloatArray(
-                    raw.size
+        val output =
+            ArrayList<Float>()
+
+        flattenTensor(
+            value = raw,
+            output = output
+        )
+
+        if (output.isEmpty()) {
+
+            throw IllegalStateException(
+                "Tensor output contained no values"
+            )
+        }
+
+        return FloatArray(
+            output.size
+        ) { index ->
+            output[index]
+        }
+    }
+
+    private fun flattenTensor(
+        value: Any?,
+        output: MutableList<Float>
+    ) {
+
+        when (value) {
+
+            is FloatArray -> {
+
+                for (
+                    item in value
                 ) {
-                    raw[it]
-                        .toFloat()
-                }
 
-            is Array<*> -> {
-
-                val first =
-                    raw.firstOrNull()
-
-                when (first) {
-
-                    is FloatArray ->
-                        first
-
-                    is DoubleArray ->
-                        FloatArray(
-                            first.size
-                        ) {
-                            first[it]
-                                .toFloat()
-                        }
-
-                    is Array<*> -> {
-
-                        first.flatMap { row ->
-
-                            when (row) {
-
-                                is FloatArray ->
-                                    row.toList()
-
-                                is DoubleArray ->
-                                    row.map {
-                                        it.toFloat()
-                                    }
-
-                                else ->
-                                    emptyList()
-                            }
-
-                        }.toFloatArray()
-                    }
-
-                    else ->
-                        throw IllegalStateException(
-                            "Unexpected tensor output type: " +
-                                    "${raw.javaClass.name}"
-                        )
+                    output.add(
+                        item
+                    )
                 }
             }
 
-            else ->
-                throw IllegalStateException(
-                    "Unexpected tensor output type: " +
-                            "${raw.javaClass.name}"
+            is DoubleArray -> {
+
+                for (
+                    item in value
+                ) {
+
+                    output.add(
+                        item.toFloat()
+                    )
+                }
+            }
+
+            is IntArray -> {
+
+                for (
+                    item in value
+                ) {
+
+                    output.add(
+                        item.toFloat()
+                    )
+                }
+            }
+
+            is LongArray -> {
+
+                for (
+                    item in value
+                ) {
+
+                    output.add(
+                        item.toFloat()
+                    )
+                }
+            }
+
+            is ShortArray -> {
+
+                for (
+                    item in value
+                ) {
+
+                    output.add(
+                        item.toFloat()
+                    )
+                }
+            }
+
+            is ByteArray -> {
+
+                for (
+                    item in value
+                ) {
+
+                    output.add(
+                        item.toFloat()
+                    )
+                }
+            }
+
+            is Array<*> -> {
+
+                for (
+                    item in value
+                ) {
+
+                    flattenTensor(
+                        value = item,
+                        output = output
+                    )
+                }
+            }
+
+            is Iterable<*> -> {
+
+                for (
+                    item in value
+                ) {
+
+                    flattenTensor(
+                        value = item,
+                        output = output
+                    )
+                }
+            }
+
+            is Number -> {
+
+                output.add(
+                    value.toFloat()
                 )
+            }
+
+            else -> {
+
+                throw IllegalStateException(
+                    "Unsupported tensor output type: " +
+                            value.javaClass.name
+                )
+            }
         }
     }
 
