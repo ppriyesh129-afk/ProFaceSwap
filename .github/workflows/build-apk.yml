@@ -43,13 +43,19 @@ jobs:
           wget -O app/src/main/assets/models/face_landmarker_Nx3x256x256.onnx \
             https://github.com/yakhyo/mediapipe-face-mesh-onnx/releases/download/weights/face_landmarker_Nx3x256x256.onnx
 
+      - name: Download BlazeFace detector
+        run: |
+          wget -O app/src/main/assets/models/face_detection_short_range.onnx \
+            https://github.com/yakhyo/mediapipe-face-mesh-onnx/releases/download/weights/face_detection_short_range.onnx
+
       - name: Download BlendSwap 256
         run: |
           wget -O app/src/main/assets/models/blendswap_256.onnx \
             https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/blendswap_256.onnx
 
-      - name: Verify models
+      - name: Verify AI models
         run: |
+          echo "Downloaded AI models:"
           ls -lh app/src/main/assets/models/
 
       - name: Build APK
