@@ -1836,7 +1836,8 @@ class FaceSwapEngine(
 
     private data class PreparedFace(
         val bitmap: Bitmap,
-        val transform: Matrix
+        val transform: Matrix,
+        val landmarks: Array<FloatArray>
     )
 
     private data class HyperSwapResult(
