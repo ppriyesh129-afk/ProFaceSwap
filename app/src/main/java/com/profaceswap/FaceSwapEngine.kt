@@ -1267,25 +1267,34 @@ class FaceSwapEngine(
         mask: FloatArray
     ): Bitmap {
 
-        val expected =
-            HYPER_SIZE *
-                    HYPER_SIZE
+        val size =
+            HYPER_SIZE * HYPER_SIZE
 
-        if (
-            mask.size <
-            expected
-        ) {
+        if (mask.size < size) {
 
             throw IllegalStateException(
-                "Invalid HyperSwap mask: " +
-                        "${mask.size} values"
+                "Invalid HyperSwap mask: ${mask.size} values"
             )
         }
 
-        val sourcePixels =
-            IntArray(
-                expected
+        /*
+         * STEP 1
+         *
+         * Soften the HyperSwap mask.
+         *
+         * This removes the hard visible boundary
+         * around the generated face.
+         */
+        val blurredMask =
+            blurMask(
+                mask = mask,
+                width = HYPER_SIZE,
+                height = HYPER_SIZE,
+                radius = 5
             )
+
+        val sourcePixels =
+            IntArray(size)
 
         bitmap.getPixels(
             sourcePixels,
@@ -1298,24 +1307,31 @@ class FaceSwapEngine(
         )
 
         val outputPixels =
-            IntArray(
-                expected
-            )
+            IntArray(size)
 
-        for (
-            i in 0 until expected
-        ) {
+        for (i in 0 until size) {
 
             val sourceColor =
                 sourcePixels[i]
 
+            /*
+             * Use the blurred mask as alpha.
+             *
+             * Squaring the mask keeps the center
+             * of the face stronger while making the
+             * outer transition softer.
+             */
+            val maskValue =
+                blurredMask[i]
+                    .coerceIn(
+                        0f,
+                        1f
+                    )
+
             val alpha =
                 (
-                    mask[i]
-                        .coerceIn(
-                            0f,
-                            1f
-                        ) *
+                    maskValue *
+                            maskValue *
                             255f
                     )
                     .toInt()
@@ -1327,15 +1343,9 @@ class FaceSwapEngine(
             outputPixels[i] =
                 Color.argb(
                     alpha,
-                    Color.red(
-                        sourceColor
-                    ),
-                    Color.green(
-                        sourceColor
-                    ),
-                    Color.blue(
-                        sourceColor
-                    )
+                    Color.red(sourceColor),
+                    Color.green(sourceColor),
+                    Color.blue(sourceColor)
                 )
         }
 
@@ -1355,6 +1365,155 @@ class FaceSwapEngine(
             HYPER_SIZE,
             HYPER_SIZE
         )
+
+        return output
+    }
+
+    private fun blurMask(
+        mask: FloatArray,
+        width: Int,
+        height: Int,
+        radius: Int
+    ): FloatArray {
+
+        if (radius <= 0) {
+            return mask.copyOf()
+        }
+
+        val horizontal =
+            FloatArray(
+                width * height
+            )
+
+        val output =
+            FloatArray(
+                width * height
+            )
+
+        val window =
+            radius * 2 + 1
+
+        /*
+         * HORIZONTAL BLUR
+         */
+        for (y in 0 until height) {
+
+            var sum = 0f
+
+            for (x in -radius..radius) {
+
+                val clampedX =
+                    x.coerceIn(
+                        0,
+                        width - 1
+                    )
+
+                sum +=
+                    mask[
+                        y * width +
+                                clampedX
+                    ]
+            }
+
+            for (x in 0 until width) {
+
+                horizontal[
+                    y * width + x
+                ] =
+                    sum / window
+
+                val removeX =
+                    (
+                        x - radius
+                        )
+                        .coerceIn(
+                            0,
+                            width - 1
+                        )
+
+                val addX =
+                    (
+                        x + radius + 1
+                        )
+                        .coerceIn(
+                            0,
+                            width - 1
+                        )
+
+                sum -=
+                    mask[
+                        y * width +
+                                removeX
+                    ]
+
+                sum +=
+                    mask[
+                        y * width +
+                                addX
+                    ]
+            }
+        }
+
+        /*
+         * VERTICAL BLUR
+         */
+        for (x in 0 until width) {
+
+            var sum = 0f
+
+            for (y in -radius..radius) {
+
+                val clampedY =
+                    y.coerceIn(
+                        0,
+                        height - 1
+                    )
+
+                sum +=
+                    horizontal[
+                        clampedY * width +
+                                x
+                    ]
+            }
+
+            for (y in 0 until height) {
+
+                output[
+                    y * width + x
+                ] =
+                    sum / window
+
+                val removeY =
+                    (
+                        y - radius
+                        )
+                        .coerceIn(
+                            0,
+                            height - 1
+                        )
+
+                val addY =
+                    (
+                        y + radius + 1
+                        )
+                        .coerceIn(
+                            0,
+                            height - 1
+                        )
+
+                sum -=
+                    horizontal[
+                        removeY * width +
+                                x
+                    ]
+
+                sum +=
+                    horizontal[
+                        addY * width +
+                                x
+                    ]
+            }
+        }
 
         return output
     }
