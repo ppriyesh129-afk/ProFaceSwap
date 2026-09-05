@@ -2051,6 +2051,28 @@ class FaceSwapEngine(
 
         if (hull.size >= 3) {
 
+            val centerX =
+                hull.map { it.x }.average().toFloat()
+
+            val centerY =
+                hull.map { it.y }.average().toFloat()
+
+            val shrink =
+                0.96f
+
+            for (point in hull) {
+
+                point.x =
+                    centerX +
+                            (point.x - centerX) *
+                            shrink
+
+                point.y =
+                    centerY +
+                            (point.y - centerY) *
+                            shrink
+            }
+
             val path =
                 Path()
 
