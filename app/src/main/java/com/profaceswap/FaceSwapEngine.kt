@@ -1397,72 +1397,164 @@ class FaceSwapEngine(
     }
 
     private fun pasteBack(
-        original: Bitmap,
-        swap: HyperSwapResult,
-        transform: Matrix,
-        targetLandmarks: Array<FloatArray>
-    ): Bitmap {
+    private fun pasteBack(
+    original: Bitmap,
+    swap: HyperSwapResult,
+    transform: Matrix,
+    targetLandmarks: Array<FloatArray>
+): Bitmap {
 
-        val output =
-            original.copy(
-                Bitmap.Config.ARGB_8888,
-                true
-            )
-
-        val inverse =
-            Matrix()
-
-        if (!transform.invert(inverse)) {
-
-            swap.bitmap.recycle()
-
-            throw IllegalStateException(
-                "Could not invert paste transform"
-            )
-        }
-
-        val matched =
-            matchFaceColors(
-                swap.bitmap,
-                original,
-                inverse
-            )
-
-        val maskedSwap =
-            createMaskedSwap(
-                matched,
-                swap.mask,
-                targetLandmarks,
-                transform
-            )
-
-        matched.recycle()
-
-        val paint =
-            Paint(
-                Paint.ANTI_ALIAS_FLAG or
-                        Paint.FILTER_BITMAP_FLAG
-            )
-
-        paint.isDither = true
-        paint.alpha = 255
-
-        Canvas(output).drawBitmap(
-            maskedSwap,
-            inverse,
-            paint
+    val output =
+        original.copy(
+            Bitmap.Config.ARGB_8888,
+            true
         )
 
-        smoothFaceEdges(
-            output,
-            targetLandmarks
-        )
+    val inverse = Matrix()
 
-        maskedSwap.recycle()
+    if (!transform.invert(inverse)) {
+
         swap.bitmap.recycle()
 
-        return output
+        throw IllegalStateException(
+            "Could not invert paste transform"
+        )
     }
+
+    val maskedSwap =
+        createMaskedSwap(
+            swap.bitmap,
+            swap.mask,
+            targetLandmarks,
+            transform
+        )
+
+    val sourceFull =
+        Bitmap.createBitmap(
+            original.width,
+            original.height,
+            Bitmap.Config.ARGB_8888
+        )
+
+    Canvas(sourceFull).drawBitmap(
+        maskedSwap,
+        inverse,
+        Paint(
+            Paint.ANTI_ALIAS_FLAG or
+                    Paint.FILTER_BITMAP_FLAG
+        )
+    )
+
+    val sourceMat = Mat()
+    val targetMat = Mat()
+    val sourceBgr = Mat()
+    val targetBgr = Mat()
+    val resultBgr = Mat()
+    val maskMat = Mat()
+
+    try {
+
+        Utils.bitmapToMat(
+            sourceFull,
+            sourceMat
+        )
+
+        Utils.bitmapToMat(
+            output,
+            targetMat
+        )
+
+        Imgproc.cvtColor(
+            sourceMat,
+            sourceBgr,
+            Imgproc.COLOR_RGBA2BGR
+        )
+
+        Imgproc.cvtColor(
+            targetMat,
+            targetBgr,
+            Imgproc.COLOR_RGBA2BGR
+        )
+
+        maskMat.create(
+            original.height,
+            original.width,
+            CvType.CV_8UC1
+        )
+
+        val maskPixels =
+            ByteArray(
+                original.width *
+                        original.height
+            )
+
+        val maskBitmap =
+            createOriginalFaceMask(
+                targetLandmarks,
+                original.width,
+                original.height
+            )
+
+        maskBitmap.copyPixelsToBuffer(
+            java.nio.ByteBuffer.wrap(
+                maskPixels
+            )
+        )
+
+        maskMat.put(
+            0,
+            0,
+            maskPixels
+        )
+
+        val center =
+            Point(
+                original.width / 2.0,
+                original.height / 2.0
+            )
+
+        Photo.seamlessClone(
+            sourceBgr,
+            targetBgr,
+            maskMat,
+            center,
+            resultBgr,
+            Photo.MIXED_CLONE
+        )
+
+        val resultRgba = Mat()
+
+        Imgproc.cvtColor(
+            resultBgr,
+            resultRgba,
+            Imgproc.COLOR_BGR2RGBA
+        )
+
+        Utils.matToBitmap(
+            resultRgba,
+            output
+        )
+
+        resultRgba.release()
+
+        maskBitmap.recycle()
+
+    } finally {
+
+        sourceMat.release()
+        targetMat.release()
+        sourceBgr.release()
+        targetBgr.release()
+        resultBgr.release()
+        maskMat.release()
+
+        sourceFull.recycle()
+        maskedSwap.recycle()
+        swap.bitmap.recycle()
+    }
+
+    return output
+}
 
     private fun smoothFaceEdges(
         bitmap: Bitmap,
