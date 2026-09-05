@@ -3,7 +3,6 @@ package com.profaceswap
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
-import ai.onnxruntime.TensorInfo
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -1400,13 +1399,22 @@ class FaceSwapEngine(
             throw IllegalStateException("Could not invert paste transform")
         }
 
+        val colorMatched =
+            matchSkinTone(
+                swap.bitmap,
+                original,
+                targetLandmarks
+            )
+
         val maskedSwap =
             createMaskedSwap(
-                swap.bitmap,
+                colorMatched,
                 swap.mask,
                 targetLandmarks,
                 transform
             )
+
+        colorMatched.recycle()
 
         val paint = Paint(
             Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG
@@ -1471,6 +1479,114 @@ class FaceSwapEngine(
         blurPaint.color = Color.TRANSPARENT
 
         canvas.drawPath(path, blurPaint)
+    }
+
+    private fun matchSkinTone(
+        swap: Bitmap,
+        target: Bitmap,
+        landmarks: Array<FloatArray>
+    ): Bitmap {
+
+        val result =
+            swap.copy(Bitmap.Config.ARGB_8888, true)
+
+        var sr = 0L
+        var sg = 0L
+        var sb = 0L
+
+        var tr = 0L
+        var tg = 0L
+        var tb = 0L
+
+        var count = 0L
+
+        val step = 6
+
+        for (y in 0 until HYPER_SIZE step step) {
+            for (x in 0 until HYPER_SIZE step step) {
+
+                val sc = swap.getPixel(x, y)
+
+                sr += Color.red(sc)
+                sg += Color.green(sc)
+                sb += Color.blue(sc)
+
+                val tx =
+                    (landmarks[1][0] + (x - 128)).toInt()
+                        .coerceIn(0, target.width - 1)
+
+                val ty =
+                    (landmarks[1][1] + (y - 128)).toInt()
+                        .coerceIn(0, target.height - 1)
+
+                val tc = target.getPixel(tx, ty)
+
+                tr += Color.red(tc)
+                tg += Color.green(tc)
+                tb += Color.blue(tc)
+
+                count++
+            }
+        }
+
+        if (count == 0L) return result
+
+        val rScale = tr.toFloat() / sr.coerceAtLeast(1)
+        val gScale = tg.toFloat() / sg.coerceAtLeast(1)
+        val bScale = tb.toFloat() / sb.coerceAtLeast(1)
+
+        val pixels =
+            IntArray(HYPER_SIZE * HYPER_SIZE)
+
+        result.getPixels(
+            pixels,
+            0,
+            HYPER_SIZE,
+            0,
+            0,
+            HYPER_SIZE,
+            HYPER_SIZE
+        )
+
+        for (i in pixels.indices) {
+
+            val c = pixels[i]
+
+            val r =
+                (Color.red(c) * rScale)
+                    .toInt()
+                    .coerceIn(0, 255)
+
+            val g =
+                (Color.green(c) * gScale)
+                    .toInt()
+                    .coerceIn(0, 255)
+
+            val b =
+                (Color.blue(c) * bScale)
+                    .toInt()
+                    .coerceIn(0, 255)
+
+            pixels[i] =
+                Color.argb(
+                    Color.alpha(c),
+                    r,
+                    g,
+                    b
+                )
+        }
+
+        result.setPixels(
+            pixels,
+            0,
+            HYPER_SIZE,
+            0,
+            0,
+            HYPER_SIZE,
+            HYPER_SIZE
+        )
+
+        return result
     }
 
     private fun createMaskedSwap(
