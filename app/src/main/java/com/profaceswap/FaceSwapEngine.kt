@@ -46,6 +46,11 @@ class FaceSwapEngine(
     fun loadModels(): Boolean {
 
         return try {
+            if (!OpenCVLoader.initLocal()) {
+    throw IllegalStateException(
+        "OpenCV initialization failed"
+    )
+}
 
             android.util.Log.d(
                 TAG,
