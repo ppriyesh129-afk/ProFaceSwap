@@ -1690,67 +1690,25 @@ class FaceSwapEngine(
         return bitmap
     }
 
-    private fun extractFloatArray(
-        raw: Any
-    ): FloatArray {
+    private fun extractFloatArray(raw: Any): FloatArray {
 
-        val values =
-            ArrayList<Float>()
-
-        fun flatten(
-            value: Any?
-        ) {
+        fun flatten(value: Any?): MutableList<Float> {
+            val out = mutableListOf<Float>()
 
             when (value) {
-
-                is FloatArray -> {
-
-                    for (number in value) {
-                        values.add(number)
-                    }
-                }
-
-                is DoubleArray -> {
-
-                    for (number in value) {
-                        values.add(
-                            number.toFloat()
-                        )
-                    }
-                }
-
-                is Float -> {
-
-                    values.add(value)
-                }
-
-                is Double -> {
-
-                    values.add(
-                        value.toFloat()
-                    )
-                }
-
-                is Array<*> -> {
-
-                    for (item in value) {
-                        flatten(item)
-                    }
-                }
-
-                else -> {
-
-                    throw IllegalStateException(
-                        "Unexpected tensor element type: " +
-                                "${value?.javaClass?.name}"
-                    )
-                }
+                is FloatArray -> out.addAll(value.toList())
+                is DoubleArray -> out.addAll(value.map { it.toFloat() })
+                is Array<*> -> value.forEach { out.addAll(flatten(it)) }
+                null -> {}
+                else -> throw IllegalStateException(
+                    "Unexpected tensor type: ${value.javaClass.name}"
+                )
             }
+
+            return out
         }
 
-        flatten(raw)
-
-        return values.toFloatArray()
+        return flatten(raw).toFloatArray()
     }
 
     private fun normalizeEmbedding(
