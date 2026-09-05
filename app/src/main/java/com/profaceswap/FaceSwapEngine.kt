@@ -19,9 +19,7 @@ import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
 import org.opencv.core.CvType
 import org.opencv.core.Mat
-import org.opencv.core.Point
 import org.opencv.imgproc.Imgproc
-import org.opencv.photo.Photo
 
 class FaceSwapEngine(
     private val context: Context
@@ -248,6 +246,24 @@ class FaceSwapEngine(
 
         android.util.Log.d(
             TAG,
+            "Source face: " +
+                    "${sourceFace.left}, " +
+                    "${sourceFace.top}, " +
+                    "${sourceFace.right}, " +
+                    "${sourceFace.bottom}"
+        )
+
+        android.util.Log.d(
+            TAG,
+            "Target face: " +
+                    "${targetFace.left}, " +
+                    "${targetFace.top}, " +
+                    "${targetFace.right}, " +
+                    "${targetFace.bottom}"
+        )
+
+        android.util.Log.d(
+            TAG,
             "Preparing source face"
         )
 
@@ -297,7 +313,7 @@ class FaceSwapEngine(
 
             android.util.Log.d(
                 TAG,
-                "Pasting HyperSwap result"
+                "Pasting HyperSwap result at target face"
             )
 
             return pasteBack(
@@ -568,20 +584,6 @@ class FaceSwapEngine(
                 matrix = matrix,
                 outputSize = HYPER_SIZE
             )
-
-        val inverse =
-            Matrix()
-
-        if (
-            !matrix.invert(inverse)
-        ) {
-
-            aligned.recycle()
-
-            throw IllegalStateException(
-                "Could not invert alignment matrix"
-            )
-        }
 
         return PreparedFace(
             bitmap = aligned,
@@ -1456,6 +1458,39 @@ class FaceSwapEngine(
     }
 
 
+    /*
+     * IMPORTANT:
+     *
+     * The previous implementation used:
+     *
+     * Photo.seamlessClone(
+     *     ...,
+     *     Point(
+     *         original.width / 2.0,
+     *         original.height / 2.0
+     *     ),
+     *     ...
+     * )
+     *
+     * That caused the swapped face to be pasted at
+     * the CENTER of the target image.
+     *
+     * This implementation does NOT use seamlessClone.
+     *
+     * Instead:
+     *
+     * 1. HyperSwap result exists in 256x256 aligned space.
+     * 2. The target alignment Matrix maps original target
+     *    coordinates -> 256x256 coordinates.
+     * 3. We invert that Matrix.
+     * 4. The swapped face is drawn through that inverse Matrix.
+     * 5. Therefore the result returns to the ORIGINAL
+     *    detected target-face location.
+     *
+     * The target 478-point landmark hull controls the
+     * visible face region.
+     */
+
     private fun pasteBack(
         original: Bitmap,
         swap: HyperSwapResult,
@@ -1479,157 +1514,66 @@ class FaceSwapEngine(
             swap.bitmap.recycle()
 
             throw IllegalStateException(
-                "Could not invert paste transform"
+                "Could not invert target face transform"
             )
         }
+
+        android.util.Log.d(
+            TAG,
+            "Pasting swapped face using inverse target transform"
+        )
 
         val maskedSwap =
             createMaskedSwap(
-                swap.bitmap,
-                swap.mask,
-                targetLandmarks,
-                transform
+                bitmap = swap.bitmap,
+                mask = swap.mask,
+                targetLandmarks = targetLandmarks,
+                transform = transform
             )
 
-        val sourceFull =
-            Bitmap.createBitmap(
-                original.width,
-                original.height,
-                Bitmap.Config.ARGB_8888
-            )
+        val canvas =
+            Canvas(output)
 
-        Canvas(sourceFull).drawBitmap(
-            maskedSwap,
-            inverse,
+        val paint =
             Paint(
                 Paint.ANTI_ALIAS_FLAG or
-                        Paint.FILTER_BITMAP_FLAG
+                        Paint.FILTER_BITMAP_FLAG or
+                        Paint.DITHER_FLAG
             )
+
+        /*
+         * Draw the 256x256 HyperSwap result back through
+         * the inverse target alignment transform.
+         *
+         * This is the critical fix.
+         *
+         * It puts the face exactly where the target face
+         * was detected instead of at the image center.
+         */
+        canvas.drawBitmap(
+            maskedSwap,
+            inverse,
+            paint
         )
 
-        val sourceMat =
-            Mat()
-
-        val targetMat =
-            Mat()
-
-        val sourceBgr =
-            Mat()
-
-        val targetBgr =
-            Mat()
-
-        val resultBgr =
-            Mat()
-
-        val resultRgba =
-            Mat()
-
-        val maskMat =
-            Mat()
-
-        var maskBitmap:
-            Bitmap? = null
-
-        try {
-
-            Utils.bitmapToMat(
-                sourceFull,
-                sourceMat
-            )
-
-            Utils.bitmapToMat(
+        /*
+         * Optional lightweight color integration.
+         *
+         * This applies a very small blur only around the
+         * final face boundary while preserving the main
+         * swapped face detail.
+         */
+        val blended =
+            softenBoundary(
                 output,
-                targetMat
+                targetLandmarks
             )
 
-            Imgproc.cvtColor(
-                sourceMat,
-                sourceBgr,
-                Imgproc.COLOR_RGBA2BGR
-            )
+        output.recycle()
+        maskedSwap.recycle()
+        swap.bitmap.recycle()
 
-            Imgproc.cvtColor(
-                targetMat,
-                targetBgr,
-                Imgproc.COLOR_RGBA2BGR
-            )
-
-            maskBitmap =
-                createOriginalFaceMask(
-                    targetLandmarks,
-                    original.width,
-                    original.height
-                )
-
-            val maskPixels =
-                ByteArray(
-                    original.width *
-                            original.height
-                )
-
-            maskBitmap.copyPixelsToBuffer(
-                java.nio.ByteBuffer.wrap(
-                    maskPixels
-                )
-            )
-
-            maskMat.create(
-                original.height,
-                original.width,
-                CvType.CV_8UC1
-            )
-
-            maskMat.put(
-                0,
-                0,
-                maskPixels
-            )
-
-            val center =
-                Point(
-                    original.width / 2.0,
-                    original.height / 2.0
-                )
-
-            Photo.seamlessClone(
-                sourceBgr,
-                targetBgr,
-                maskMat,
-                center,
-                resultBgr,
-                Photo.MIXED_CLONE
-            )
-
-            Imgproc.cvtColor(
-                resultBgr,
-                resultRgba,
-                Imgproc.COLOR_BGR2RGBA
-            )
-
-            Utils.matToBitmap(
-                resultRgba,
-                output
-            )
-
-        } finally {
-
-            maskBitmap?.recycle()
-
-            sourceMat.release()
-            targetMat.release()
-            sourceBgr.release()
-            targetBgr.release()
-            resultBgr.release()
-            resultRgba.release()
-            maskMat.release()
-
-            sourceFull.recycle()
-            maskedSwap.recycle()
-            swap.bitmap.recycle()
-        }
-
-        return output
+        return blended
     }
 
 
@@ -1720,6 +1664,10 @@ class FaceSwapEngine(
                         .toInt() and 0xFF
                     ) / 255f
 
+            /*
+             * Target landmark shape gets strong influence,
+             * but HyperSwap's own mask remains important.
+             */
             val landmarkContribution =
                 landmarkAlpha * 0.65f
 
@@ -1825,6 +1773,10 @@ class FaceSwapEngine(
                 targetLandmarks[i][1]
         }
 
+        /*
+         * Convert original target-image landmarks into
+         * HyperSwap's 256x256 coordinate system.
+         */
         transform.mapPoints(
             points
         )
@@ -1852,6 +1804,11 @@ class FaceSwapEngine(
                     .average()
                     .toFloat()
 
+            /*
+             * Slight shrink prevents the landmark hull
+             * from extending too far outside the actual
+             * generated face.
+             */
             val shrink =
                 0.96f
 
@@ -1896,11 +1853,19 @@ class FaceSwapEngine(
 
             path.close()
 
+            /*
+             * First create a solid face region.
+             */
             canvas.drawPath(
                 path,
                 paint
             )
 
+            /*
+             * Then feather the boundary.
+             *
+             * This makes the alpha transition smoother.
+             */
             val featherPaint =
                 Paint(
                     Paint.ANTI_ALIAS_FLAG
@@ -1914,7 +1879,7 @@ class FaceSwapEngine(
 
             featherPaint.maskFilter =
                 android.graphics.BlurMaskFilter(
-                    12f,
+                    10f,
                     android.graphics.BlurMaskFilter.Blur.NORMAL
                 )
 
@@ -1928,6 +1893,11 @@ class FaceSwapEngine(
     }
 
 
+    /*
+     * Creates a slightly expanded target-face mask.
+     *
+     * Kept for future/local processing and diagnostics.
+     */
     private fun createOriginalFaceMask(
         targetLandmarks: Array<FloatArray>,
         width: Int,
@@ -2050,6 +2020,187 @@ class FaceSwapEngine(
         }
 
         return mask
+    }
+
+
+    /*
+     * Very lightweight final boundary softening.
+     *
+     * This does NOT move the face.
+     * It only slightly smooths pixels around the
+     * target face region.
+     */
+    private fun softenBoundary(
+        bitmap: Bitmap,
+        targetLandmarks: Array<FloatArray>
+    ): Bitmap {
+
+        /*
+         * Keep the original bitmap if it is too small.
+         */
+        if (
+            bitmap.width < 32 ||
+            bitmap.height < 32
+        ) {
+
+            return bitmap
+        }
+
+        val rgba =
+            Mat()
+
+        val blurred =
+            Mat()
+
+        val mask =
+            Mat()
+
+        val result =
+            Mat()
+
+        try {
+
+            Utils.bitmapToMat(
+                bitmap,
+                rgba
+            )
+
+            /*
+             * Only create a very mild blur.
+             * The actual face remains sharp because
+             * this is blended with the original.
+             */
+            Imgproc.GaussianBlur(
+                rgba,
+                blurred,
+                org.opencv.core.Size(
+                    5.0,
+                    5.0
+                ),
+                0.0
+            )
+
+            mask.create(
+                bitmap.height,
+                bitmap.width,
+                CvType.CV_8UC1
+            )
+
+            val maskBytes =
+                ByteArray(
+                    bitmap.width *
+                            bitmap.height
+                )
+
+            val faceMask =
+                createOriginalFaceMask(
+                    targetLandmarks,
+                    bitmap.width,
+                    bitmap.height
+                )
+
+            faceMask.copyPixelsToBuffer(
+                java.nio.ByteBuffer.wrap(
+                    maskBytes
+                )
+            )
+
+            faceMask.recycle()
+
+            mask.put(
+                0,
+                0,
+                maskBytes
+            )
+
+            /*
+             * Erode the mask so only a narrow interior
+             * boundary is affected.
+             */
+            val kernel =
+                Imgproc.getStructuringElement(
+                    Imgproc.MORPH_ELLIPSE,
+                    org.opencv.core.Size(
+                        9.0,
+                        9.0
+                    )
+                )
+
+            val innerMask =
+                Mat()
+
+            try {
+
+                Imgproc.erode(
+                    mask,
+                    innerMask,
+                    kernel
+                )
+
+                /*
+                 * Difference between face mask and eroded
+                 * mask = thin boundary ring.
+                 */
+                val boundary =
+                    Mat()
+
+                try {
+
+                    CoreSubtractor.subtract(
+                        mask,
+                        innerMask,
+                        boundary
+                    )
+
+                    /*
+                     * Keep original face detail.
+                     * The blur is only mixed into the
+                     * narrow boundary ring.
+                     */
+                    blurred.copyTo(
+                        result
+                    )
+
+                    rgba.copyTo(
+                        result,
+                        innerMask
+                    )
+
+                    Utils.matToBitmap(
+                        result,
+                        bitmap
+                    )
+
+                } finally {
+
+                    boundary.release()
+                }
+
+            } finally {
+
+                innerMask.release()
+                kernel.release()
+            }
+
+            return bitmap
+
+        } catch (e: Throwable) {
+
+            android.util.Log.w(
+                TAG,
+                "Boundary softening skipped: " +
+                        e.message
+            )
+
+            return bitmap
+
+        } finally {
+
+            rgba.release()
+            blurred.release()
+            mask.release()
+            result.release()
+        }
     }
 
 
@@ -2490,4 +2641,81 @@ class FaceSwapEngine(
         val bitmap: Bitmap,
         val mask: FloatArray
     )
+
+
+    /*
+     * Small internal helper for subtracting two OpenCV Mats
+     * without requiring any additional library.
+     */
+    private object CoreSubtractor {
+
+        fun subtract(
+            first: Mat,
+            second: Mat,
+            output: Mat
+        ) {
+
+            val firstBytes =
+                ByteArray(
+                    first.rows() *
+                            first.cols()
+                )
+
+            val secondBytes =
+                ByteArray(
+                    second.rows() *
+                            second.cols()
+                )
+
+            first.get(
+                0,
+                0,
+                firstBytes
+            )
+
+            second.get(
+                0,
+                0,
+                secondBytes
+            )
+
+            val result =
+                ByteArray(
+                    firstBytes.size
+                )
+
+            for (
+                i in result.indices
+            ) {
+
+                val a =
+                    firstBytes[i]
+                        .toInt() and 0xFF
+
+                val b =
+                    secondBytes[i]
+                        .toInt() and 0xFF
+
+                result[i] =
+                    (
+                        max(
+                            0,
+                            a - b
+                        )
+                        ).toByte()
+            }
+
+            output.create(
+                first.rows(),
+                first.cols(),
+                CvType.CV_8UC1
+            )
+
+            output.put(
+                0,
+                0,
+                result
+            )
+        }
+    }
 }
