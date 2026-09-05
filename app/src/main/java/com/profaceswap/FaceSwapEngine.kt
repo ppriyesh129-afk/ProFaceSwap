@@ -16,6 +16,14 @@ import java.nio.FloatBuffer
 import kotlin.math.max
 import kotlin.math.sqrt
 
+import org.opencv.android.OpenCVLoader
+import org.opencv.android.Utils
+import org.opencv.core.Mat
+import org.opencv.core.Point
+import org.opencv.core.CvType
+import org.opencv.imgproc.Imgproc
+import org.opencv.photo.Photo
+
 class FaceSwapEngine(
     private val context: Context
 ) {
