@@ -1694,72 +1694,63 @@ class FaceSwapEngine(
         raw: Any
     ): FloatArray {
 
-        return when (raw) {
+        val values =
+            ArrayList<Float>()
 
-            is FloatArray ->
-                raw
+        fun flatten(
+            value: Any?
+        ) {
 
-            is DoubleArray ->
-                FloatArray(
-                    raw.size
-                ) {
-                    raw[it]
-                        .toFloat()
+            when (value) {
+
+                is FloatArray -> {
+
+                    for (number in value) {
+                        values.add(number)
+                    }
                 }
 
-            is Array<*> -> {
+                is DoubleArray -> {
 
-                val first =
-                    raw.firstOrNull()
-
-                when (first) {
-
-                    is FloatArray ->
-                        first
-
-                    is DoubleArray ->
-                        FloatArray(
-                            first.size
-                        ) {
-                            first[it]
-                                .toFloat()
-                        }
-
-                    is Array<*> -> {
-
-                        first.flatMap { row ->
-
-                            when (row) {
-
-                                is FloatArray ->
-                                    row.toList()
-
-                                is DoubleArray ->
-                                    row.map {
-                                        it.toFloat()
-                                    }
-
-                                else ->
-                                    emptyList()
-                            }
-
-                        }.toFloatArray()
-                    }
-
-                    else ->
-                        throw IllegalStateException(
-                            "Unexpected tensor output type: " +
-                                    "${raw.javaClass.name}"
+                    for (number in value) {
+                        values.add(
+                            number.toFloat()
                         )
+                    }
+                }
+
+                is Float -> {
+
+                    values.add(value)
+                }
+
+                is Double -> {
+
+                    values.add(
+                        value.toFloat()
+                    )
+                }
+
+                is Array<*> -> {
+
+                    for (item in value) {
+                        flatten(item)
+                    }
+                }
+
+                else -> {
+
+                    throw IllegalStateException(
+                        "Unexpected tensor element type: " +
+                                "${value?.javaClass?.name}"
+                    )
                 }
             }
-
-            else ->
-                throw IllegalStateException(
-                    "Unexpected tensor output type: " +
-                            "${raw.javaClass.name}"
-                )
         }
+
+        flatten(raw)
+
+        return values.toFloatArray()
     }
 
     private fun normalizeEmbedding(
