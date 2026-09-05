@@ -1391,25 +1391,13 @@ class FaceSwapEngine(
     ): Bitmap {
 
         val output =
-            original.copy(
-                Bitmap.Config.ARGB_8888,
-                true
-            )
+            original.copy(Bitmap.Config.ARGB_8888, true)
 
-        val inverse =
-            Matrix()
+        val inverse = Matrix()
 
-        if (
-            !transform.invert(
-                inverse
-            )
-        ) {
-
+        if (!transform.invert(inverse)) {
             swap.bitmap.recycle()
-
-            throw IllegalStateException(
-                "Could not invert paste transform"
-            )
+            throw IllegalStateException("Could not invert paste transform")
         }
 
         val maskedSwap =
@@ -1420,27 +1408,69 @@ class FaceSwapEngine(
                 transform
             )
 
-        val canvas =
-            Canvas(
-                output
-            )
-
-        val paint =
-            Paint(
-                Paint.ANTI_ALIAS_FLAG or
-                        Paint.FILTER_BITMAP_FLAG
-            )
-
-        canvas.drawBitmap(
-            maskedSwap,
-            inverse,
-            paint
+        val paint = Paint(
+            Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG
         )
+
+        paint.isDither = true
+        paint.alpha = 255
+
+        Canvas(output).drawBitmap(maskedSwap, inverse, paint)
+
+        smoothFaceEdges(output, targetLandmarks)
 
         maskedSwap.recycle()
         swap.bitmap.recycle()
 
         return output
+    }
+
+    private fun smoothFaceEdges(
+        bitmap: Bitmap,
+        landmarks: Array<FloatArray>
+    ) {
+
+        val canvas = Canvas(bitmap)
+
+        val path = Path()
+
+        val jaw = listOf(
+            10,338,297,332,284,251,389,356,
+            454,323,361,288,397,365,379,
+            378,400,377,152,148,176,149,
+            150,136,172,58,132,93,234,
+            127,162,21,54,103,67
+        )
+
+        if (jaw.isEmpty()) return
+
+        path.moveTo(
+            landmarks[jaw.first()][0],
+            landmarks[jaw.first()][1]
+        )
+
+        for (i in 1 until jaw.size) {
+            path.lineTo(
+                landmarks[jaw[i]][0],
+                landmarks[jaw[i]][1]
+            )
+        }
+
+        path.close()
+
+        val blurPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        blurPaint.style = Paint.Style.STROKE
+        blurPaint.strokeWidth = 14f
+        blurPaint.maskFilter =
+            android.graphics.BlurMaskFilter(
+                10f,
+                android.graphics.BlurMaskFilter.Blur.NORMAL
+            )
+
+        blurPaint.color = Color.TRANSPARENT
+
+        canvas.drawPath(path, blurPaint)
     }
 
     private fun createMaskedSwap(
