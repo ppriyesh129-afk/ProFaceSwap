@@ -3,6 +3,7 @@ package com.profaceswap
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import ai.onnxruntime.TensorInfo
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -1390,42 +1391,59 @@ class FaceSwapEngine(
     ): Bitmap {
 
         val output =
-            original.copy(Bitmap.Config.ARGB_8888, true)
+            original.copy(
+                Bitmap.Config.ARGB_8888,
+                true
+            )
 
-        val inverse = Matrix()
+        val inverse =
+            Matrix()
 
         if (!transform.invert(inverse)) {
+
             swap.bitmap.recycle()
-            throw IllegalStateException("Could not invert paste transform")
+
+            throw IllegalStateException(
+                "Could not invert paste transform"
+            )
         }
 
-        val colorMatched =
-            matchSkinTone(
+        val matched =
+            matchFaceColors(
                 swap.bitmap,
                 original,
-                targetLandmarks
+                inverse
             )
 
         val maskedSwap =
             createMaskedSwap(
-                colorMatched,
+                matched,
                 swap.mask,
                 targetLandmarks,
                 transform
             )
 
-        colorMatched.recycle()
+        matched.recycle()
 
-        val paint = Paint(
-            Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG
-        )
+        val paint =
+            Paint(
+                Paint.ANTI_ALIAS_FLAG or
+                        Paint.FILTER_BITMAP_FLAG
+            )
 
         paint.isDither = true
         paint.alpha = 255
 
-        Canvas(output).drawBitmap(maskedSwap, inverse, paint)
+        Canvas(output).drawBitmap(
+            maskedSwap,
+            inverse,
+            paint
+        )
 
-        smoothFaceEdges(output, targetLandmarks)
+        smoothFaceEdges(
+            output,
+            targetLandmarks
+        )
 
         maskedSwap.recycle()
         swap.bitmap.recycle()
@@ -1438,17 +1456,20 @@ class FaceSwapEngine(
         landmarks: Array<FloatArray>
     ) {
 
-        val canvas = Canvas(bitmap)
+        val canvas =
+            Canvas(bitmap)
 
-        val path = Path()
+        val path =
+            Path()
 
-        val jaw = listOf(
-            10,338,297,332,284,251,389,356,
-            454,323,361,288,397,365,379,
-            378,400,377,152,148,176,149,
-            150,136,172,58,132,93,234,
-            127,162,21,54,103,67
-        )
+        val jaw =
+            listOf(
+                10,338,297,332,284,251,389,356,
+                454,323,361,288,397,365,379,
+                378,400,377,152,148,176,149,
+                150,136,172,58,132,93,234,
+                127,162,21,54,103,67
+            )
 
         if (jaw.isEmpty()) return
 
@@ -1458,6 +1479,7 @@ class FaceSwapEngine(
         )
 
         for (i in 1 until jaw.size) {
+
             path.lineTo(
                 landmarks[jaw[i]][0],
                 landmarks[jaw[i]][1]
@@ -1466,19 +1488,30 @@ class FaceSwapEngine(
 
         path.close()
 
-        val blurPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val blurPaint =
+            Paint(
+                Paint.ANTI_ALIAS_FLAG
+            )
 
-        blurPaint.style = Paint.Style.STROKE
-        blurPaint.strokeWidth = 14f
+        blurPaint.style =
+            Paint.Style.STROKE
+
+        blurPaint.strokeWidth =
+            14f
+
         blurPaint.maskFilter =
             android.graphics.BlurMaskFilter(
                 10f,
                 android.graphics.BlurMaskFilter.Blur.NORMAL
             )
 
-        blurPaint.color = Color.TRANSPARENT
+        blurPaint.color =
+            Color.TRANSPARENT
 
-        canvas.drawPath(path, blurPaint)
+        canvas.drawPath(
+            path,
+            blurPaint
+        )
     }
 
     private fun matchSkinTone(
@@ -1488,7 +1521,10 @@ class FaceSwapEngine(
     ): Bitmap {
 
         val result =
-            swap.copy(Bitmap.Config.ARGB_8888, true)
+            swap.copy(
+                Bitmap.Config.ARGB_8888,
+                true
+            )
 
         var sr = 0L
         var sg = 0L
@@ -1502,24 +1538,51 @@ class FaceSwapEngine(
 
         val step = 6
 
-        for (y in 0 until HYPER_SIZE step step) {
-            for (x in 0 until HYPER_SIZE step step) {
+        for (
+            y in 0 until HYPER_SIZE step step
+        ) {
 
-                val sc = swap.getPixel(x, y)
+            for (
+                x in 0 until HYPER_SIZE step step
+            ) {
+
+                val sc =
+                    swap.getPixel(
+                        x,
+                        y
+                    )
 
                 sr += Color.red(sc)
                 sg += Color.green(sc)
                 sb += Color.blue(sc)
 
                 val tx =
-                    (landmarks[1][0] + (x - 128)).toInt()
-                        .coerceIn(0, target.width - 1)
+                    (
+                        landmarks[1][0] +
+                                (x - 128)
+                        )
+                        .toInt()
+                        .coerceIn(
+                            0,
+                            target.width - 1
+                        )
 
                 val ty =
-                    (landmarks[1][1] + (y - 128)).toInt()
-                        .coerceIn(0, target.height - 1)
+                    (
+                        landmarks[1][1] +
+                                (y - 128)
+                        )
+                        .toInt()
+                        .coerceIn(
+                            0,
+                            target.height - 1
+                        )
 
-                val tc = target.getPixel(tx, ty)
+                val tc =
+                    target.getPixel(
+                        tx,
+                        ty
+                    )
 
                 tr += Color.red(tc)
                 tg += Color.green(tc)
@@ -1529,14 +1592,27 @@ class FaceSwapEngine(
             }
         }
 
-        if (count == 0L) return result
+        if (count == 0L) {
+            return result
+        }
 
-        val rScale = tr.toFloat() / sr.coerceAtLeast(1)
-        val gScale = tg.toFloat() / sg.coerceAtLeast(1)
-        val bScale = tb.toFloat() / sb.coerceAtLeast(1)
+        val rScale =
+            tr.toFloat() /
+                    sr.coerceAtLeast(1)
+
+        val gScale =
+            tg.toFloat() /
+                    sg.coerceAtLeast(1)
+
+        val bScale =
+            tb.toFloat() /
+                    sb.coerceAtLeast(1)
 
         val pixels =
-            IntArray(HYPER_SIZE * HYPER_SIZE)
+            IntArray(
+                HYPER_SIZE *
+                        HYPER_SIZE
+            )
 
         result.getPixels(
             pixels,
@@ -1550,22 +1626,41 @@ class FaceSwapEngine(
 
         for (i in pixels.indices) {
 
-            val c = pixels[i]
+            val c =
+                pixels[i]
 
             val r =
-                (Color.red(c) * rScale)
+                (
+                    Color.red(c) *
+                            rScale
+                    )
                     .toInt()
-                    .coerceIn(0, 255)
+                    .coerceIn(
+                        0,
+                        255
+                    )
 
             val g =
-                (Color.green(c) * gScale)
+                (
+                    Color.green(c) *
+                            gScale
+                    )
                     .toInt()
-                    .coerceIn(0, 255)
+                    .coerceIn(
+                        0,
+                        255
+                    )
 
             val b =
-                (Color.blue(c) * bScale)
+                (
+                    Color.blue(c) *
+                            bScale
+                    )
                     .toInt()
-                    .coerceIn(0, 255)
+                    .coerceIn(
+                        0,
+                        255
+                    )
 
             pixels[i] =
                 Color.argb(
@@ -1740,6 +1835,146 @@ class FaceSwapEngine(
         return output
     }
 
+    private fun matchFaceColors(
+        swap: Bitmap,
+        target: Bitmap,
+        inverse: Matrix
+    ): Bitmap {
+
+        val out =
+            swap.copy(
+                Bitmap.Config.ARGB_8888,
+                true
+            )
+
+        val src =
+            IntArray(
+                HYPER_SIZE *
+                        HYPER_SIZE
+            )
+
+        val dst =
+            IntArray(
+                HYPER_SIZE *
+                        HYPER_SIZE
+            )
+
+        out.getPixels(
+            src,
+            0,
+            HYPER_SIZE,
+            0,
+            0,
+            HYPER_SIZE,
+            HYPER_SIZE
+        )
+
+        target.getPixels(
+            dst,
+            0,
+            target.width,
+            0,
+            0,
+            minOf(
+                target.width,
+                HYPER_SIZE
+            ),
+            minOf(
+                target.height,
+                HYPER_SIZE
+            )
+        )
+
+        var sr = 0L
+        var sg = 0L
+        var sb = 0L
+
+        var tr = 0L
+        var tg = 0L
+        var tb = 0L
+
+        val n =
+            minOf(
+                src.size,
+                dst.size
+            )
+
+        for (i in 0 until n) {
+
+            sr += Color.red(src[i])
+            sg += Color.green(src[i])
+            sb += Color.blue(src[i])
+
+            tr += Color.red(dst[i])
+            tg += Color.green(dst[i])
+            tb += Color.blue(dst[i])
+        }
+
+        val rMul =
+            (tr.toFloat() / n) /
+                    (sr.toFloat() / n)
+                        .coerceAtLeast(1f)
+
+        val gMul =
+            (tg.toFloat() / n) /
+                    (sg.toFloat() / n)
+                        .coerceAtLeast(1f)
+
+        val bMul =
+            (tb.toFloat() / n) /
+                    (sb.toFloat() / n)
+                        .coerceAtLeast(1f)
+
+        for (i in src.indices) {
+
+            src[i] =
+                Color.rgb(
+
+                    (
+                        Color.red(src[i]) *
+                                rMul
+                        )
+                        .coerceIn(
+                            0f,
+                            255f
+                        )
+                        .toInt(),
+
+                    (
+                        Color.green(src[i]) *
+                                gMul
+                        )
+                        .coerceIn(
+                            0f,
+                            255f
+                        )
+                        .toInt(),
+
+                    (
+                        Color.blue(src[i]) *
+                                bMul
+                        )
+                        .coerceIn(
+                            0f,
+                            255f
+                        )
+                        .toInt()
+                )
+        }
+
+        out.setPixels(
+            src,
+            0,
+            HYPER_SIZE,
+            0,
+            0,
+            HYPER_SIZE,
+            HYPER_SIZE
+        )
+
+        return out
+    }
+
     private fun imageToBitmap(
         values: FloatArray
     ): Bitmap {
@@ -1836,25 +2071,52 @@ class FaceSwapEngine(
         return bitmap
     }
 
-    private fun extractFloatArray(raw: Any): FloatArray {
+    private fun extractFloatArray(
+        raw: Any
+    ): FloatArray {
 
-        fun flatten(value: Any?): MutableList<Float> {
-            val out = mutableListOf<Float>()
+        fun flatten(
+            value: Any?
+        ): MutableList<Float> {
+
+            val out =
+                mutableListOf<Float>()
 
             when (value) {
-                is FloatArray -> out.addAll(value.toList())
-                is DoubleArray -> out.addAll(value.map { it.toFloat() })
-                is Array<*> -> value.forEach { out.addAll(flatten(it)) }
+
+                is FloatArray ->
+                    out.addAll(
+                        value.toList()
+                    )
+
+                is DoubleArray ->
+                    out.addAll(
+                        value.map {
+                            it.toFloat()
+                        }
+                    )
+
+                is Array<*> ->
+                    value.forEach {
+                        out.addAll(
+                            flatten(it)
+                        )
+                    }
+
                 null -> {}
-                else -> throw IllegalStateException(
-                    "Unexpected tensor type: ${value.javaClass.name}"
-                )
+
+                else ->
+                    throw IllegalStateException(
+                        "Unexpected tensor type: " +
+                                "${value.javaClass.name}"
+                    )
             }
 
             return out
         }
 
-        return flatten(raw).toFloatArray()
+        return flatten(raw)
+            .toFloatArray()
     }
 
     private fun normalizeEmbedding(
@@ -1999,7 +2261,9 @@ class FaceSwapEngine(
 
         var i = 0
 
-        while (i + 1 < points.size) {
+        while (
+            i + 1 < points.size
+        ) {
 
             input.add(
                 PointF(
@@ -2063,7 +2327,9 @@ class FaceSwapEngine(
         val upper =
             ArrayList<PointF>()
 
-        for (index in sorted.indices.reversed()) {
+        for (
+            index in sorted.indices.reversed()
+        ) {
 
             val point =
                 sorted[index]
@@ -2122,15 +2388,20 @@ class FaceSwapEngine(
                 Paint.ANTI_ALIAS_FLAG
             )
 
-        paint.color = Color.WHITE
-        paint.style = Paint.Style.FILL
+        paint.color =
+            Color.WHITE
+
+        paint.style =
+            Paint.Style.FILL
 
         val points =
             FloatArray(
                 targetLandmarks.size * 2
             )
 
-        for (i in targetLandmarks.indices) {
+        for (
+            i in targetLandmarks.indices
+        ) {
 
             points[i * 2] =
                 targetLandmarks[i][0]
@@ -2142,29 +2413,49 @@ class FaceSwapEngine(
         transform.mapPoints(points)
 
         val hull =
-            convexHullPoints(points)
+            convexHullPoints(
+                points
+            )
 
-        if (hull.size >= 3) {
+        if (
+            hull.size >= 3
+        ) {
 
             val centerX =
-                hull.map { it.x }.average().toFloat()
+                hull.map {
+                    it.x
+                }
+                    .average()
+                    .toFloat()
 
             val centerY =
-                hull.map { it.y }.average().toFloat()
+                hull.map {
+                    it.y
+                }
+                    .average()
+                    .toFloat()
 
             val shrink =
                 0.96f
 
-            for (point in hull) {
+            for (
+                point in hull
+            ) {
 
                 point.x =
                     centerX +
-                            (point.x - centerX) *
+                            (
+                                point.x -
+                                        centerX
+                                ) *
                             shrink
 
                 point.y =
                     centerY +
-                            (point.y - centerY) *
+                            (
+                                point.y -
+                                        centerY
+                                ) *
                             shrink
             }
 
@@ -2176,7 +2467,9 @@ class FaceSwapEngine(
                 hull[0].y
             )
 
-            for (i in 1 until hull.size) {
+            for (
+                i in 1 until hull.size
+            ) {
 
                 path.lineTo(
                     hull[i].x,
@@ -2196,8 +2489,12 @@ class FaceSwapEngine(
                     Paint.ANTI_ALIAS_FLAG
                 )
 
-            featherPaint.color = Color.WHITE
-            featherPaint.style = Paint.Style.FILL
+            featherPaint.color =
+                Color.WHITE
+
+            featherPaint.style =
+                Paint.Style.FILL
+
             featherPaint.maskFilter =
                 android.graphics.BlurMaskFilter(
                     12f,
